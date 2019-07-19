@@ -5,6 +5,14 @@ go:
 - 1.12.5
 services:
 - docker
+eploy:
+  provider: releases
+  api_key:
+    secure: "CfxVi+E62pT/DfQZoyH7FHiZS8JYYcxbAD6gLDv9SqtcAfPXWPZhOX01KJhN+vGuIm0WR9ZoPHC862NgGC0RuN7ljlzRbxYlzCN6QwvVogNfipxgYDOMr7HMbdPuM8+SW434wW54vyEdkb+cTH3/8+Ht7pGBvZ7ie31X3J21Hcs4oChQqJc3uhYmP/fYQg7e4xmkt4GAfaTNsv5oXlVfsTulNqHzRxrj1eoPv89NpoMmoP5IzB3fhJucx87IVaR80CTB3SBEGM/tCRVkXF/pYWYTkFi8nUmdGeucY++5oYfH2e8vybfjQdkNt1r1E3s80bX8aYMzaFgnK1d5wO1wlGtI8N/ps80kPyE97hWmUTIdRyWfVSZr4MimMFwsXdb+m1CqwN31LzdyGknxGqmj2g10mriW+rL5ZCXP8VD541DrBClhcpk3dfeGNAuFX4yhZyB456y/gviac7ue8aUCrty4E5DBo40FOk6jaDoFRKyGKjyXNSas1tgav+txD7M0mOyOEXBbjoT2WMyKrQFzt3EFgVpwuiUIJeMsShnAyyx24QWg0PclZUisHKhkJZ5NO+W/oIuBH4a0KpDGY4ABD3kgptNaykhiChJGi0uqRU65zOyH68LJ8dFn5lPgwnuxZZqRyYNcZfmFN9LuO4dD2mOskGMJMBM4jWcVJ+gGlDs="
+  on:
+    tags: true
+  file: "./build/khostdns"
+  skip_cleanup: true
 env:
   global:
   - GO111MODULE=on
