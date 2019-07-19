@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -212,6 +213,7 @@ func (ad *AWSData) GetAddresses(hostName string) ([]string, error) {
 			ip_a = append(ip_a, i.(string))
 			return false
 		})
+		sort.Strings(ip_a)
 		return ip_a, nil
 	} else {
 		return []string{}, nil
