@@ -32,12 +32,15 @@ type PromStats struct {
 	dnsUpdateErrors prometheus.Counter
 }
 
-var log stimlog.StimLogger = stimlog.GetLogger()
+var log2 stimlog.StimLogger = stimlog.GetLogger() //Fix for deadlock
+var log stimlog.StimLogger = stimlog.GetLoggerWithPrefix("Watch")
 var version string
 
 func main() {
-	log.SetLevel(stimlog.InfoLevel)
-	log.ForceFlush(true)
+	lc := stimlog.GetLoggerConfig()
+	lc.SetLevel(stimlog.InfoLevel)
+	lc.ForceFlush(true)
+
 	config := viper.New()
 	config.SetEnvPrefix("khostdns")
 	config.AutomaticEnv()
@@ -83,13 +86,13 @@ func main() {
 			}
 			switch strings.ToLower(config.GetString("loglevel")) {
 			case "info":
-				log.SetLevel(stimlog.InfoLevel)
+				lc.SetLevel(stimlog.InfoLevel)
 			case "warn":
-				log.SetLevel(stimlog.WarnLevel)
+				lc.SetLevel(stimlog.WarnLevel)
 			case "debug":
-				log.SetLevel(stimlog.DebugLevel)
+				lc.SetLevel(stimlog.DebugLevel)
 			case "trace":
-				log.SetLevel(stimlog.TraceLevel)
+				lc.SetLevel(stimlog.TraceLevel)
 			}
 
 			czids := strings.Split(config.GetString("awszones"), ",")
@@ -111,12 +114,12 @@ func main() {
 			var dnsP DNSProvider
 			dnsP, err := awsr53.NewAWS(zids, filters, time.Minute*5)
 			if err != nil {
-				log.Fatal(err)
+				log2.Fatal(err)
 			}
 
 			kw, err := kubeWatcher.NewKube(filters)
 			if err != nil {
-				log.Fatal(err)
+				log2.Fatal(err)
 			}
 			mip := config.GetString("metricsIP")
 			if mip == "0.0.0.0" {
@@ -125,7 +128,7 @@ func main() {
 			mipp := fmt.Sprintf("%s:%s", mip, config.GetString("metricsPort"))
 			http.Handle("/metrics", promhttp.Handler())
 			time.Sleep(1) //Let some stats run before we start
-			log.Info("metrics listening on http://{}", mipp)
+			log2.Info("metrics listening on http://{}", mipp)
 			go http.ListenAndServe(mipp, nil)
 			startWatching(dnsP, kw, stats)
 			for {
@@ -149,7 +152,7 @@ func main() {
 
 	err := cmd.Execute()
 	if err != nil {
-		log.Fatal(err)
+		log2.Fatal(err)
 	}
 }
 
@@ -158,13 +161,13 @@ func startWatching(dnsP DNSProvider, kw *kubeWatcher.KubeWatcher, stats *PromSta
 	var currentSleep time.Duration
 	defaultSleep := time.Minute
 	currentSleep = defaultSleep
-	log.Info("Watch: ----Start Watch Loop----")
+	log.Info("----Start Watch Loop----")
 	hostSet := sets.NewSet()
 	for {
 		select {
 		case <-time.After(currentSleep):
 			if hostSet.Cardinality() == 0 {
-				log.Debug("Watch: No Changes detected syncing hosts")
+				log.Debug("No Changes detected syncing hosts")
 				for _, val := range kw.GetCurrentHosts() {
 					hostSet.Add(val)
 				}
@@ -172,7 +175,7 @@ func startWatching(dnsP DNSProvider, kw *kubeWatcher.KubeWatcher, stats *PromSta
 					hostSet.Add(val)
 				}
 			} else {
-				log.Info("Watch: Running checks on changed hosts:{}", hostSet.ToSlice())
+				log.Info("Running checks on changed hosts:{}", hostSet.ToSlice())
 			}
 			hostSet.Each(func(item interface{}) bool {
 				checkHost(dnsP, kw, item.(string), stats)
@@ -182,12 +185,12 @@ func startWatching(dnsP DNSProvider, kw *kubeWatcher.KubeWatcher, stats *PromSta
 			currentSleep = defaultSleep
 		case changedHost := <-kw.GetNotifyChannel():
 			stats.totalEvents.Inc()
-			log.Debug("Watch: Got update from kube for host:{}", changedHost)
+			log.Debug("Got update from kube for host:{}", changedHost)
 			hostSet.Add(changedHost)
 			currentSleep = time.Second * 5
 		case changedHost := <-dnsP.GetDNSUpdater():
 			stats.totalEvents.Inc()
-			log.Debug("Watch: Got update from DNSProvider for host:{}", changedHost)
+			log.Debug("Got update from DNSProvider for host:{}", changedHost)
 			hostSet.Add(changedHost)
 			currentSleep = time.Second * 5
 		}
@@ -195,30 +198,30 @@ func startWatching(dnsP DNSProvider, kw *kubeWatcher.KubeWatcher, stats *PromSta
 }
 
 func checkHost(dnsp DNSProvider, kube *kubeWatcher.KubeWatcher, host string, stats *PromStats) {
-	log.Info("Watch: Checking Host: --=={}==--", host)
+	log.Info("Checking Host: --=={}==--", host)
 	awsIPs, err := dnsp.GetAddresses(host)
 	if err != nil {
-		log.Warn("Watch: problem getting IPs for dns:{}", err)
+		log.Warn("problem getting IPs for dns:{}", err)
 		return
 	} else {
-		log.Debug("Watch: dns  Host:{}, IPS: {}", host, awsIPs)
+		log.Debug("dns  Host:{}, IPS: {}", host, awsIPs)
 	}
 	kubeIPs, err := kube.GetIpsForHost(host)
 	if err != nil {
-		log.Warn("Watch: problem getting IPs for kube:{}", err)
+		log.Warn("problem getting IPs for kube:{}", err)
 		return
 	} else {
-		log.Debug("Watch: kube Host:{}, IPS: {}", host, kubeIPs)
+		log.Debug("kube Host:{}, IPS: {}", host, kubeIPs)
 	}
 	if !cmp.Equal(kubeIPs, awsIPs) {
 		stats.dnsUpdateEvents.Inc()
-		log.Info("Watch: Host:{}, Needs updated, kubeIPs:{}, dnsIPs:{}", host, kubeIPs, awsIPs)
+		log.Info("Host:{}, Needs updated, kubeIPs:{}, dnsIPs:{}", host, kubeIPs, awsIPs)
 		err := dnsp.SetAddresses(host, kubeIPs)
 		if err != nil {
-			log.Warn("Watch: Problems updating DNS:{}", err)
+			log.Warn("Problems updating DNS:{}", err)
 			stats.dnsUpdateErrors.Inc()
 		}
 	} else {
-		log.Info("Watch: Host:{}, No changes Needed IPs:{}", host, kubeIPs)
+		log.Info("Host:{}, No changes Needed IPs:{}", host, kubeIPs)
 	}
 }

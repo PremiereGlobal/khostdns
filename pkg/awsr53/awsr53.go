@@ -39,7 +39,8 @@ type AWSData struct {
 	currentHosts    prometheus.Gauge
 }
 
-var log stimlog.StimLogger = stimlog.GetLogger()
+var log2 stimlog.StimLogger = stimlog.GetLogger() //Fix for deadlock
+var log stimlog.StimLogger = stimlog.GetLoggerWithPrefix("AWS")
 
 func NewAWS(zones []string, dnsfilters []string, delay time.Duration) (*AWSData, error) {
 	sess, err := session.NewSession(&aws.Config{Region: aws.String("us-east-1")})
@@ -86,7 +87,7 @@ func NewAWS(zones []string, dnsfilters []string, delay time.Duration) (*AWSData,
 		for _, zid := range ad.zones {
 			if zid == aws_z {
 				ad.zoneNames.Store(zid, name)
-				log.Info("AWS: found zone, {}:{}", aws_z, name)
+				log.Info("found zone, {}:{}", aws_z, name)
 			}
 		}
 	}
@@ -108,6 +109,7 @@ func (ad *AWSData) checkDNSFilter(hostName string) error {
 }
 
 func (ad *AWSData) SetAddresses(hostName string, ips []string) error {
+	log.Info("SetAddress HOST:{} IPS:{}", hostName, ips)
 	var err error
 	err = ad.checkDNSFilter(hostName)
 	if err != nil {
@@ -120,13 +122,15 @@ func (ad *AWSData) SetAddresses(hostName string, ips []string) error {
 	for _, v := range ips {
 		newSet.Add(v)
 	}
+	log.Info("SetAddress HOST:{} IPS:{} NS:{}", hostName, ips, newSet)
 	var origSet sets.Set
 	if v, ok := ad.awsHosts.Load(hostName); ok {
 		origSet = v.(sets.Set)
 	} else {
 		origSet = sets.NewSet()
 	}
-	if origSet.Difference(newSet).Cardinality() > 0 {
+
+	if newSet.Difference(origSet).Cardinality() > 0 {
 		var zid string
 		ad.zoneNames.Range(func(key interface{}, value interface{}) bool {
 			sv := value.(string)
@@ -136,7 +140,7 @@ func (ad *AWSData) SetAddresses(hostName string, ips []string) error {
 			}
 			return true
 		})
-		log.Info("AWS: Setting zid:{} host:{} to IPS:{} was:{}", zid, hostName, newSet.ToSlice(), origSet.ToSlice())
+		log.Info("Setting zid:{} host:{} to IPS:{} was:{}", zid, hostName, newSet.ToSlice(), origSet.ToSlice())
 		start := time.Now()
 		rr := make([]*route53.ResourceRecord, 0, len(ips))
 		for _, ip := range ips {
@@ -165,29 +169,29 @@ func (ad *AWSData) SetAddresses(hostName string, ips []string) error {
 			if err != nil {
 				if strings.Contains(err.Error(), "Throttling:") {
 					ad.dnsThrottles.Inc()
-					log.Warn("AWS: Hit throttle setting dns:{} {}", hostName, err.Error())
+					log.Warn("Hit throttle setting dns:{} {}", hostName, err.Error())
 					time.Sleep(time.Millisecond * 500)
 					continue
 				}
 				ad.dnsErrors.Inc()
-				log.Warn("AWS: error updating DNS for:{}, error:{}", hostName, err)
+				log.Warn("error updating DNS for:{}, error:{}", hostName, err)
 				return err
 			} else {
 				break
 			}
 		}
 		if err != nil && crrsr == nil {
-			log.Warn("AWS: Hit Final throttle setting dns, aborting:{} {}", hostName, err.Error())
+			log.Warn("Hit Final throttle setting dns, aborting:{} {}", hostName, err.Error())
 			return err
 		}
-		log.Info("AWS: Waiting for Route53 to update host:{}", hostName)
+		log.Info("Waiting for Route53 to update host:{}", hostName)
 		err := ad.r53.WaitUntilResourceRecordSetsChanged(&route53.GetChangeInput{Id: crrsr.ChangeInfo.Id})
 		if err != nil {
 			ad.dnsErrors.Inc()
-			log.Warn("AWS: got error waiting for DNS update:{}, error:{}", hostName, err)
+			log.Warn("got error waiting for DNS update:{}, error:{}", hostName, err)
 			return err
 		}
-		log.Info("AWS: Done Waiting for Route53 to update host:{}", hostName)
+		log.Info("Done Waiting for Route53 to update host:{}", hostName)
 
 		sec_l := math.Round(float64(time.Since(start).Nanoseconds())/1000000.0) / 1000.0
 		ad.dnsSetLatency.Observe(sec_l)
@@ -195,7 +199,7 @@ func (ad *AWSData) SetAddresses(hostName string, ips []string) error {
 		ad.awsHosts.Store(hostName, newSet)
 		ad.forceUpdate <- true
 	} else {
-		log.Info("AWS: Setting host:{} already set to IPS:{}", hostName, origSet.ToSlice())
+		log.Info("Setting host:{} already set to IPS:{}", hostName, origSet.ToSlice())
 	}
 
 	return nil
@@ -272,7 +276,7 @@ func (ad *AWSData) getAWSZoneNames() (map[string]string, error) {
 
 func (ad *AWSData) getAWSInfo() {
 	for {
-		log.Trace("AWS: Loop Start")
+		log.Trace("Loop Start")
 		start := time.Now()
 		change := sets.NewSet()
 		for _, zid := range ad.zones {
@@ -296,7 +300,7 @@ func (ad *AWSData) getAWSInfo() {
 		}
 		loopTime := time.Since(start).Seconds()
 		ad.dnsLoopLatency.Observe(loopTime)
-		log.Trace("AWS: Loop End: {}s", fmt.Sprintf("%.4f", loopTime))
+		log.Trace("Loop End: {}s", fmt.Sprintf("%.4f", loopTime))
 		if change.Cardinality() > 0 {
 			change.Each(func(i interface{}) bool {
 				ad.notifyChannel <- i.(string)

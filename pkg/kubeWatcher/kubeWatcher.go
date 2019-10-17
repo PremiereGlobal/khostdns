@@ -49,7 +49,8 @@ type KubeWatcher struct {
 	currentHosts  prometheus.Gauge
 }
 
-var log stimlog.StimLogger = stimlog.GetLogger()
+var log2 stimlog.StimLogger = stimlog.GetLogger() //Fix for deadlock
+var log stimlog.StimLogger = stimlog.GetLoggerWithPrefix("KUBE")
 
 func NewKube(dnsfilters []string) (*KubeWatcher, error) {
 	var kubeConfig *restclient.Config
@@ -155,7 +156,7 @@ func (kd *KubeWatcher) GetNotifyChannel() chan string {
 func (kd *KubeWatcher) podsWatcher() {
 	for {
 		time.Sleep(time.Minute)
-		log.Debug("Kube: Running Cleanup")
+		log.Debug("Running Cleanup")
 		cleanup := make([]string, 0, 10)
 		kd.pods.Range(func(pn interface{}, podi interface{}) bool {
 			name := pn.(string)
@@ -181,7 +182,7 @@ func (kd *KubeWatcher) podUpdated(old interface{}, new interface{}) {
 	pod := new.(*v1.Pod)
 	if hostdns, ok := pod.ObjectMeta.Annotations["hostdns"]; ok {
 		externalIP := kd.getPodExternalIP(pod)
-		log.Debug("Kube: Pod updated: {} - {}:{}", pod.ObjectMeta.Name, hostdns, externalIP)
+		log.Debug("Pod updated: {} - {}:{}", pod.ObjectMeta.Name, hostdns, externalIP)
 		if externalIP != "" {
 			kd.addnewIP(pod.ObjectMeta.Name, hostdns, externalIP)
 		}
@@ -192,7 +193,7 @@ func (kd *KubeWatcher) podCreated(obj interface{}) {
 	pod := obj.(*v1.Pod)
 	if hostdns, ok := pod.ObjectMeta.Annotations["hostdns"]; ok {
 		externalIP := kd.getPodExternalIP(pod)
-		log.Info("Kube: Pod created: {} - {}:{}", pod.ObjectMeta.Name, hostdns, externalIP)
+		log.Info("Pod created: {} - {}:{}", pod.ObjectMeta.Name, hostdns, externalIP)
 		if externalIP != "" {
 			kd.addnewIP(pod.ObjectMeta.Name, hostdns, externalIP)
 		}
@@ -205,12 +206,12 @@ func (kd *KubeWatcher) addnewIP(pod_name string, host string, ipa string) {
 		if ips.Add(ipa) {
 			kd.kubeHosts.Store(host, ips)
 			kd.dnsChanges.Inc()
-			log.Info("Kube: host:{} added IP:{}, Current IP list:{}", host, ipa, ips.ToSlice())
+			log.Info("host:{} added IP:{}, Current IP list:{}", host, ipa, ips.ToSlice())
 			kd.notifyChannel <- host
 		}
 	} else {
 		kd.dnsChanges.Inc()
-		log.Info("Kube: host:{} added IP:{}, Current IP list:[{}]", host, ipa, ipa)
+		log.Info("host:{} added IP:{}, Current IP list:[{}]", host, ipa, ipa)
 		kd.notifyChannel <- host
 	}
 	kd.currentHosts.Set(float64(len(kd.GetCurrentHosts())))
@@ -221,7 +222,7 @@ func (kd *KubeWatcher) podDeleted(obj interface{}) {
 	pod := obj.(*v1.Pod)
 	if hostdns, ok := pod.ObjectMeta.Annotations["hostdns"]; ok {
 		externalIP := kd.getPodExternalIP(pod)
-		log.Info("Kube: Pod deleted: {} - {}", pod.ObjectMeta.Name, externalIP)
+		log.Info("Pod deleted: {} - {}", pod.ObjectMeta.Name, externalIP)
 		if externalIP != "" {
 			kd.removeIP(pod.ObjectMeta.Name, hostdns, externalIP)
 		}
@@ -234,10 +235,10 @@ func (kd *KubeWatcher) removeIP(pod_name string, host string, ipa string) {
 		if ips.Contains(ipa) {
 			ips.Remove(ipa)
 			kd.kubeHosts.Store(host, ips)
-			log.Info("Kube: host:{} Deleted IP:{}, Current IP list:{}", host, ipa, ips.ToSlice())
+			log.Info("host:{} Deleted IP:{}, Current IP list:{}", host, ipa, ips.ToSlice())
 			kd.notifyChannel <- host
 		} else {
-			log.Info("Kube: Asked to delete non-existing IP for host:{} missing IP:{}, Current IP list:{}", host, ipa, ips.ToSlice())
+			log.Info("Asked to delete non-existing IP for host:{} missing IP:{}, Current IP list:{}", host, ipa, ips.ToSlice())
 		}
 	}
 	kd.currentHosts.Set(float64(len(kd.GetCurrentHosts())))
