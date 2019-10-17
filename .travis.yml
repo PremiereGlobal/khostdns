@@ -1,8 +1,5 @@
 sudo: required
 dist: bionic
-language: go
-go:
-- 1.12.5
 services:
 - docker
 eploy:
