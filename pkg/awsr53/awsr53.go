@@ -130,7 +130,7 @@ func (ad *AWSData) SetAddresses(hostName string, ips []string) error {
 		origSet = sets.NewSet()
 	}
 
-	if newSet.Difference(origSet).Cardinality() > 0 {
+	if newSet.SymmetricDifference(origSet).Cardinality() > 0 {
 		var zid string
 		ad.zoneNames.Range(func(key interface{}, value interface{}) bool {
 			sv := value.(string)
