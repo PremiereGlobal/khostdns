@@ -1,6 +1,8 @@
-# github.com/PremiereGlobal/stim v0.1.2
+# github.com/PremiereGlobal/stim v0.1.6
+## explicit
 github.com/PremiereGlobal/stim/pkg/stimlog
-# github.com/aws/aws-sdk-go v1.20.20
+# github.com/aws/aws-sdk-go v1.25.6
+## explicit
 github.com/aws/aws-sdk-go/aws
 github.com/aws/aws-sdk-go/aws/awserr
 github.com/aws/aws-sdk-go/aws/awsutil
@@ -21,6 +23,7 @@ github.com/aws/aws-sdk-go/aws/session
 github.com/aws/aws-sdk-go/aws/signer/v4
 github.com/aws/aws-sdk-go/internal/ini
 github.com/aws/aws-sdk-go/internal/sdkio
+github.com/aws/aws-sdk-go/internal/sdkmath
 github.com/aws/aws-sdk-go/internal/sdkrand
 github.com/aws/aws-sdk-go/internal/sdkuri
 github.com/aws/aws-sdk-go/internal/shareddefaults
@@ -33,15 +36,18 @@ github.com/aws/aws-sdk-go/private/protocol/restxml
 github.com/aws/aws-sdk-go/private/protocol/xml/xmlutil
 github.com/aws/aws-sdk-go/service/route53
 github.com/aws/aws-sdk-go/service/sts
-# github.com/beorn7/perks v1.0.0
+github.com/aws/aws-sdk-go/service/sts/stsiface
+# github.com/beorn7/perks v1.0.1
 github.com/beorn7/perks/quantile
-# github.com/cornelk/hashmap v1.0.0
+# github.com/cornelk/hashmap v1.0.1
+## explicit
 github.com/cornelk/hashmap
 # github.com/davecgh/go-spew v1.1.1
 github.com/davecgh/go-spew/spew
 # github.com/dchest/siphash v1.1.0
 github.com/dchest/siphash
 # github.com/deckarep/golang-set v1.7.1
+## explicit
 github.com/deckarep/golang-set
 # github.com/fsnotify/fsnotify v1.4.7
 github.com/fsnotify/fsnotify
@@ -57,6 +63,7 @@ github.com/golang/protobuf/ptypes/timestamp
 # github.com/google/btree v1.0.0
 github.com/google/btree
 # github.com/google/go-cmp v0.3.1
+## explicit
 github.com/google/go-cmp/cmp
 github.com/google/go-cmp/cmp/internal/diff
 github.com/google/go-cmp/cmp/internal/flags
@@ -64,7 +71,7 @@ github.com/google/go-cmp/cmp/internal/function
 github.com/google/go-cmp/cmp/internal/value
 # github.com/google/gofuzz v1.0.0
 github.com/google/gofuzz
-# github.com/googleapis/gnostic v0.3.0
+# github.com/googleapis/gnostic v0.3.1
 github.com/googleapis/gnostic/OpenAPIv2
 github.com/googleapis/gnostic/compiler
 github.com/googleapis/gnostic/extensions
@@ -107,36 +114,40 @@ github.com/modern-go/reflect2
 github.com/pelletier/go-toml
 # github.com/peterbourgon/diskv v2.0.1+incompatible
 github.com/peterbourgon/diskv
-# github.com/prometheus/client_golang v0.9.3
+# github.com/prometheus/client_golang v1.1.0
+## explicit
 github.com/prometheus/client_golang/prometheus
 github.com/prometheus/client_golang/prometheus/internal
 github.com/prometheus/client_golang/prometheus/promauto
 github.com/prometheus/client_golang/prometheus/promhttp
 # github.com/prometheus/client_model v0.0.0-20190129233127-fd36f4220a90
 github.com/prometheus/client_model/go
-# github.com/prometheus/common v0.4.0
+# github.com/prometheus/common v0.6.0
 github.com/prometheus/common/expfmt
 github.com/prometheus/common/internal/bitbucket.org/ww/goautoneg
 github.com/prometheus/common/model
-# github.com/prometheus/procfs v0.0.0-20190507164030-5867b95ac084
+# github.com/prometheus/procfs v0.0.3
 github.com/prometheus/procfs
 github.com/prometheus/procfs/internal/fs
 # github.com/spf13/afero v1.2.2
+## explicit
 github.com/spf13/afero
 github.com/spf13/afero/mem
 # github.com/spf13/cast v1.3.0
 github.com/spf13/cast
 # github.com/spf13/cobra v0.0.5
+## explicit
 github.com/spf13/cobra
 # github.com/spf13/jwalterweatherman v1.0.0
 github.com/spf13/jwalterweatherman
 # github.com/spf13/pflag v1.0.3
 github.com/spf13/pflag
 # github.com/spf13/viper v1.4.0
+## explicit
 github.com/spf13/viper
-# golang.org/x/crypto v0.0.0-20190701094942-4def268fd1a4
+# golang.org/x/crypto v0.0.0-20191011191535-87dc89f01550
 golang.org/x/crypto/ssh/terminal
-# golang.org/x/net v0.0.0-20190813141303-74dc4d7220e7
+# golang.org/x/net v0.0.0-20190923162816-aa69164e4478
 golang.org/x/net/context
 golang.org/x/net/context/ctxhttp
 golang.org/x/net/http/httpguts
@@ -144,9 +155,10 @@ golang.org/x/net/http2
 golang.org/x/net/http2/hpack
 golang.org/x/net/idna
 # golang.org/x/oauth2 v0.0.0-20190604053449-0f29369cfe45
+## explicit
 golang.org/x/oauth2
 golang.org/x/oauth2/internal
-# golang.org/x/sys v0.0.0-20190813064441-fde4db37ae7a
+# golang.org/x/sys v0.0.0-20191120155948-bd437916bb0e
 golang.org/x/sys/unix
 golang.org/x/sys/windows
 # golang.org/x/text v0.3.2
@@ -155,6 +167,7 @@ golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
 # golang.org/x/time v0.0.0-20190921001708-c4c64cad1fd0
+## explicit
 golang.org/x/time/rate
 # google.golang.org/appengine v1.6.0
 google.golang.org/appengine/internal
@@ -166,9 +179,10 @@ google.golang.org/appengine/internal/urlfetch
 google.golang.org/appengine/urlfetch
 # gopkg.in/inf.v0 v0.9.1
 gopkg.in/inf.v0
-# gopkg.in/yaml.v2 v2.2.2
+# gopkg.in/yaml.v2 v2.2.8
 gopkg.in/yaml.v2
 # k8s.io/api v0.0.0-20190409092523-d687e77c8ae9 => k8s.io/api v0.0.0-20190222213804-5cb15d344471
+## explicit
 k8s.io/api/admissionregistration/v1alpha1
 k8s.io/api/admissionregistration/v1beta1
 k8s.io/api/apps/v1
@@ -202,6 +216,7 @@ k8s.io/api/storage/v1
 k8s.io/api/storage/v1alpha1
 k8s.io/api/storage/v1beta1
 # k8s.io/apimachinery v0.0.0-20190409092423-760d1845f48b => k8s.io/apimachinery v0.0.0-20190221213512-86fb29eff628
+## explicit
 k8s.io/apimachinery/pkg/api/errors
 k8s.io/apimachinery/pkg/api/meta
 k8s.io/apimachinery/pkg/api/resource
@@ -241,7 +256,8 @@ k8s.io/apimachinery/pkg/util/yaml
 k8s.io/apimachinery/pkg/version
 k8s.io/apimachinery/pkg/watch
 k8s.io/apimachinery/third_party/forked/golang/reflect
-# k8s.io/client-go v0.0.0-20190419212732-59781b88d0fa => k8s.io/client-go v10.0.0+incompatible
+# k8s.io/client-go v11.0.0+incompatible => k8s.io/client-go v10.0.0+incompatible
+## explicit
 k8s.io/client-go/discovery
 k8s.io/client-go/informers
 k8s.io/client-go/informers/admissionregistration
@@ -376,6 +392,11 @@ k8s.io/client-go/util/homedir
 k8s.io/client-go/util/integer
 k8s.io/client-go/util/retry
 # k8s.io/klog v1.0.0
+## explicit
 k8s.io/klog
 # sigs.k8s.io/yaml v1.1.0
 sigs.k8s.io/yaml
+# github.com/PremiereGlobal/khostdns => ./
+# k8s.io/api => k8s.io/api v0.0.0-20190222213804-5cb15d344471
+# k8s.io/apimachinery => k8s.io/apimachinery v0.0.0-20190221213512-86fb29eff628
+# k8s.io/client-go => k8s.io/client-go v10.0.0+incompatible

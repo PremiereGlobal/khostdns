@@ -22,7 +22,7 @@ echo "---------------------"
 echo "  Building khostdns  "
 echo "---------------------"
 
-docker run --rm -e VERSION=${VERSION} -e HOME=/tmp -u $(id -u ${USER}):$(id -g ${USER}) -v "$PWD":/go/khostdns -w /go/khostdns golang:1.12.5 \
+docker run --rm -e VERSION=${VERSION} -e HOME=/tmp -u $(id -u ${USER}):$(id -g ${USER}) -v "$PWD":/go/khostdns -w /go/khostdns golang:1.14 \
 ./build.sh
 
 echo ""
