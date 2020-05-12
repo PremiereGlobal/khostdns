@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/PremiereGlobal/khostdns/pkg/awsr53"
+	"github.com/PremiereGlobal/khostdns/pkg/khostdns"
 	"github.com/PremiereGlobal/khostdns/pkg/kubeWatcher"
 	"github.com/PremiereGlobal/stim/pkg/stimlog"
 	sets "github.com/deckarep/golang-set"
@@ -18,13 +19,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
-
-type DNSProvider interface {
-	GetAddresses(string) ([]string, error)
-	SetAddresses(string, []string) error
-	GetCurrentHosts() []string
-	GetDNSUpdater() chan string
-}
 
 type PromStats struct {
 	totalEvents     prometheus.Counter
@@ -111,7 +105,7 @@ func main() {
 
 			filters := strings.Split(config.GetString("dnsfilters"), ",")
 
-			var dnsP DNSProvider
+			var dnsP khostdns.DNSSetter
 			dnsP, err := awsr53.NewAWS(zids, filters, time.Minute*5)
 			if err != nil {
 				log2.Fatal(err)
@@ -156,7 +150,7 @@ func main() {
 	}
 }
 
-func startWatching(dnsP DNSProvider, kw *kubeWatcher.KubeWatcher, stats *PromStats) {
+func startWatching(dnsP khostdns.DNSSetter, kw *kubeWatcher.KubeWatcher, stats *PromStats) {
 
 	var currentSleep time.Duration
 	defaultSleep := time.Minute
@@ -191,13 +185,13 @@ func startWatching(dnsP DNSProvider, kw *kubeWatcher.KubeWatcher, stats *PromSta
 		case changedHost := <-dnsP.GetDNSUpdater():
 			stats.totalEvents.Inc()
 			log.Debug("Got update from DNSProvider for host:{}", changedHost)
-			hostSet.Add(changedHost)
+			hostSet.Add(changedHost.GetHostname())
 			currentSleep = time.Second * 5
 		}
 	}
 }
 
-func checkHost(dnsp DNSProvider, kube *kubeWatcher.KubeWatcher, host string, stats *PromStats) {
+func checkHost(dnsp khostdns.DNSSetter, kube *kubeWatcher.KubeWatcher, host string, stats *PromStats) {
 	log.Info("Checking Host: --=={}==--", host)
 	awsIPs, err := dnsp.GetAddresses(host)
 	if err != nil {
@@ -216,7 +210,7 @@ func checkHost(dnsp DNSProvider, kube *kubeWatcher.KubeWatcher, host string, sta
 	if !cmp.Equal(kubeIPs, awsIPs) {
 		stats.dnsUpdateEvents.Inc()
 		log.Info("Host:{}, Needs updated, kubeIPs:{}, dnsIPs:{}", host, kubeIPs, awsIPs)
-		err := dnsp.SetAddresses(host, kubeIPs)
+		err := dnsp.SetAddresses(khostdns.CreateArecord(host, kubeIPs))
 		if err != nil {
 			log.Warn("Problems updating DNS:{}", err)
 			stats.dnsUpdateErrors.Inc()

@@ -1,6 +1,6 @@
 module github.com/PremiereGlobal/khostdns
 
-go 1.12
+go 1.13
 
 replace (
 	github.com/PremiereGlobal/khostdns => ./

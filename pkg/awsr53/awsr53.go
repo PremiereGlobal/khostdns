@@ -1,48 +1,69 @@
 package awsr53 // import "github.com/PremiereGlobal/khostdns/pkg/awsr53"
 
 import (
-	"errors"
 	"fmt"
-	"math"
-	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/PremiereGlobal/khostdns/pkg/khostdns"
 	"github.com/PremiereGlobal/stim/pkg/stimlog"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/route53"
 	sets "github.com/deckarep/golang-set"
+	"github.com/google/go-cmp/cmp"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
-type AWSData struct {
-	awsHosts        sync.Map
-	lastChecked     time.Time
-	zones           []string
-	zoneNames       sync.Map
-	dnsfilters      []string
-	delay           time.Duration
-	session         *session.Session
-	notifyChannel   chan string
-	lockUpdate      *sync.Mutex
-	forceUpdate     chan bool
-	r53             *route53.Route53
-	dnsErrors       prometheus.Counter
-	dnsThrottles    prometheus.Counter
-	dnsSetLatency   prometheus.Histogram
-	dnsCheckLatency prometheus.Histogram
-	dnsLoopLatency  prometheus.Histogram
-	currentHosts    prometheus.Gauge
-}
-
 var log2 stimlog.StimLogger = stimlog.GetLogger() //Fix for deadlock
 var log stimlog.StimLogger = stimlog.GetLoggerWithPrefix("AWS")
 
-func NewAWS(zones []string, dnsfilters []string, delay time.Duration) (*AWSData, error) {
+var dnsThrottles = promauto.NewCounter(prometheus.CounterOpts{
+	Name: "khostdns_aws_throttles_total",
+	Help: "The total number of throttles recived from the AWS r53 API",
+})
+var dnsErrors = promauto.NewCounter(prometheus.CounterOpts{
+	Name: "khostdns_aws_errors_total",
+	Help: "The total number of errors recived from the AWS r53 API",
+})
+var currentHosts = promauto.NewGauge(prometheus.GaugeOpts{
+	Name: "khostdns_aws_hosts_current",
+	Help: "The current number of AWS dns entries controlled by this cluster",
+})
+var dnsSetLatency = promauto.NewHistogram(prometheus.HistogramOpts{
+	Name: "khostdns_aws_set_dns_seconds",
+	Help: "The time it takes to make AWS r53 changes",
+})
+var dnsCheckLatency = promauto.NewHistogram(prometheus.HistogramOpts{
+	Name: "khostdns_aws_check_dns_seconds",
+	Help: "The time it takes to check an AWS r53 DNS zone",
+})
+var dnsLoopLatency = promauto.NewHistogram(prometheus.HistogramOpts{
+	Name: "khostdns_aws_sync_loop_seconds",
+	Help: "The time it takes to fully loop over all AWS r53 zones",
+})
+
+//AWSData is the main Data Struct for AWSProvider
+type AWSData struct {
+	awsHosts      sync.Map
+	lastChecked   time.Time
+	zones         []string
+	zoneNames     sync.Map
+	dnsfilters    *khostdns.DNSFilter
+	delay         time.Duration
+	session       *session.Session
+	notifyChannel chan khostdns.Arecord
+	hostChange    chan khostdns.Arecord
+	forceUpdate   chan bool
+	r53           *route53.Route53
+	running       bool
+}
+
+//NewAWS Creates a new AWSProvider for the set zones with the set filters
+func NewAWS(zones []string, dnsfilters []string, delay time.Duration) (khostdns.DNSSetter, error) {
 	sess, err := session.NewSession(&aws.Config{Region: aws.String("us-east-1")})
 	if err != nil {
 		return nil, err
@@ -50,178 +71,60 @@ func NewAWS(zones []string, dnsfilters []string, delay time.Duration) (*AWSData,
 	r53 := route53.New(sess)
 	ad := &AWSData{
 		zones:         zones,
-		dnsfilters:    dnsfilters,
+		dnsfilters:    khostdns.CreateDNSFilter(dnsfilters),
 		delay:         delay,
-		lockUpdate:    &sync.Mutex{},
-		notifyChannel: make(chan string, 20),
+		notifyChannel: make(chan khostdns.Arecord),
+		hostChange:    make(chan khostdns.Arecord),
 		forceUpdate:   make(chan bool),
 		session:       sess,
 		r53:           r53,
-		dnsThrottles: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "khostdns_aws_throttles_total",
-			Help: "The total number of throttles recived from the AWS r53 API",
-		}),
-		dnsErrors: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "khostdns_aws_errors_total",
-			Help: "The total number of errors recived from the AWS r53 API",
-		}),
-		currentHosts: promauto.NewGauge(prometheus.GaugeOpts{
-			Name: "khostdns_aws_hosts_current",
-			Help: "The current number of AWS dns entries controlled by this cluster",
-		}),
-		dnsSetLatency: promauto.NewHistogram(prometheus.HistogramOpts{
-			Name: "khostdns_aws_set_dns_seconds",
-			Help: "The time it takes to make AWS r53 changes",
-		}),
-		dnsCheckLatency: promauto.NewHistogram(prometheus.HistogramOpts{
-			Name: "khostdns_aws_check_dns_seconds",
-			Help: "The time it takes to check an AWS r53 DNS zone",
-		}),
-		dnsLoopLatency: promauto.NewHistogram(prometheus.HistogramOpts{
-			Name: "khostdns_aws_sync_loop_seconds",
-			Help: "The time it takes to fully loop over all AWS r53 zones",
-		}),
+		running:       false,
 	}
 	m, err := ad.getAWSZoneNames()
-	for aws_z, name := range m {
+	for awsZ, name := range m {
 		for _, zid := range ad.zones {
-			if zid == aws_z {
+			if zid == awsZ {
 				ad.zoneNames.Store(zid, name)
-				log.Info("found zone, {}:{}", aws_z, name)
+				log.Info("found zone, {}:{}", awsZ, name)
 			}
 		}
 	}
-	go ad.getAWSInfo()
+	ad.running = true
+
+	go ad.loop()
 	return ad, nil
 }
 
-func (ad *AWSData) checkDNSFilter(hostName string) error {
-	failFilter := len(ad.dnsfilters) > 0
-	for _, v := range ad.dnsfilters {
-		if strings.Contains(hostName, v) {
-			failFilter = false
-		}
+func (ad *AWSData) Shutdown() {
+	ad.running = false
+	select {
+	case ad.forceUpdate <- true:
+	case <-time.After(1 * time.Second):
 	}
-	if failFilter {
-		return errors.New(fmt.Sprintf("DNS name: %v does match any filters %v", hostName, ad.dnsfilters))
-	}
-	return nil
 }
 
-func (ad *AWSData) SetAddresses(hostName string, ips []string) error {
-	log.Info("SetAddress HOST:{} IPS:{}", hostName, ips)
+func (ad *AWSData) SetAddresses(awsa khostdns.Arecord) error {
+	log.Info("Got SetAddress call: HOST:{} IPS:{}", awsa.GetHostname(), awsa.GetIps())
 	var err error
-	err = ad.checkDNSFilter(hostName)
+	err = ad.dnsfilters.CheckDNSFilter(awsa.GetHostname())
 	if err != nil {
 		return err
 	}
-	ad.lockUpdate.Lock()
-	defer ad.lockUpdate.Unlock()
-
-	newSet := sets.NewSet()
-	for _, v := range ips {
-		newSet.Add(v)
-	}
-	log.Info("SetAddress HOST:{} IPS:{} NS:{}", hostName, ips, newSet)
-	var origSet sets.Set
-	if v, ok := ad.awsHosts.Load(hostName); ok {
-		origSet = v.(sets.Set)
-	} else {
-		origSet = sets.NewSet()
-	}
-
-	if newSet.SymmetricDifference(origSet).Cardinality() > 0 {
-		var zid string
-		ad.zoneNames.Range(func(key interface{}, value interface{}) bool {
-			sv := value.(string)
-			if strings.HasSuffix(hostName, sv) {
-				zid = key.(string)
-				return false
-			}
-			return true
-		})
-		log.Info("Setting zid:{} host:{} to IPS:{} was:{}", zid, hostName, newSet.ToSlice(), origSet.ToSlice())
-		start := time.Now()
-		rr := make([]*route53.ResourceRecord, 0, len(ips))
-		for _, ip := range ips {
-			nrr := &route53.ResourceRecord{Value: aws.String(ip)}
-			rr = append(rr, nrr)
-		}
-		ttl := int64(60)
-		change := &route53.ChangeResourceRecordSetsInput{
-			HostedZoneId: aws.String(zid),
-			ChangeBatch: &route53.ChangeBatch{
-				Changes: []*route53.Change{
-					{
-						Action: aws.String(route53.ChangeActionUpsert),
-						ResourceRecordSet: &route53.ResourceRecordSet{
-							Name:            aws.String(hostName),
-							TTL:             &ttl,
-							Type:            aws.String(route53.RRTypeA),
-							ResourceRecords: rr,
-						},
-					},
-				},
-			}}
-		var crrsr *route53.ChangeResourceRecordSetsOutput
-		for i := 0; i < 10; i++ {
-			crrsr, err = ad.r53.ChangeResourceRecordSets(change)
-			if err != nil {
-				if strings.Contains(err.Error(), "Throttling:") {
-					ad.dnsThrottles.Inc()
-					log.Warn("Hit throttle setting dns:{} {}", hostName, err.Error())
-					time.Sleep(time.Millisecond * 500)
-					continue
-				}
-				ad.dnsErrors.Inc()
-				log.Warn("error updating DNS for:{}, error:{}", hostName, err)
-				return err
-			} else {
-				break
-			}
-		}
-		if err != nil && crrsr == nil {
-			log.Warn("Hit Final throttle setting dns, aborting:{} {}", hostName, err.Error())
-			return err
-		}
-		log.Info("Waiting for Route53 to update host:{}", hostName)
-		err := ad.r53.WaitUntilResourceRecordSetsChanged(&route53.GetChangeInput{Id: crrsr.ChangeInfo.Id})
-		if err != nil {
-			ad.dnsErrors.Inc()
-			log.Warn("got error waiting for DNS update:{}, error:{}", hostName, err)
-			return err
-		}
-		log.Info("Done Waiting for Route53 to update host:{}", hostName)
-
-		sec_l := math.Round(float64(time.Since(start).Nanoseconds())/1000000.0) / 1000.0
-		ad.dnsSetLatency.Observe(sec_l)
-
-		ad.awsHosts.Store(hostName, newSet)
-		ad.forceUpdate <- true
-	} else {
-		log.Info("Setting host:{} already set to IPS:{}", hostName, origSet.ToSlice())
-	}
-
+	ad.hostChange <- awsa
 	return nil
 }
 
 func (ad *AWSData) GetAddresses(hostName string) ([]string, error) {
-	err := ad.checkDNSFilter(hostName)
+	err := ad.dnsfilters.CheckDNSFilter(hostName)
 	if err != nil {
 		return nil, err
 	}
 	if v, ok := ad.awsHosts.Load(hostName); ok {
-		ips := v.(sets.Set)
-		ip_a := make([]string, 0, ips.Cardinality())
-		ips.Each(func(i interface{}) bool {
-			ip_a = append(ip_a, i.(string))
-			return false
-		})
-		sort.Strings(ip_a)
-		return ip_a, nil
-	} else {
-		return []string{}, nil
+		ar := v.(khostdns.Arecord)
+		return ar.GetIps(), nil
 	}
+	return []string{}, nil
+
 }
 
 func (ad *AWSData) GetCurrentHosts() []string {
@@ -233,14 +136,13 @@ func (ad *AWSData) GetCurrentHosts() []string {
 	return keys
 }
 
-func (ad *AWSData) GetDNSUpdater() chan string {
+func (ad *AWSData) GetDNSUpdater() <-chan khostdns.Arecord {
 	return ad.notifyChannel
 }
 
+//Runs once on construction
 func (ad *AWSData) getAWSZoneNames() (map[string]string, error) {
-	ad.lockUpdate.Lock()
-	defer ad.lockUpdate.Unlock()
-	timer := prometheus.NewTimer(ad.dnsCheckLatency)
+	timer := prometheus.NewTimer(dnsCheckLatency)
 	defer timer.ObserveDuration()
 	var rso *route53.ListHostedZonesOutput = &route53.ListHostedZonesOutput{}
 	allZones := make(map[string]string)
@@ -250,7 +152,7 @@ func (ad *AWSData) getAWSZoneNames() (map[string]string, error) {
 		}
 		rsoTmp, err := ad.r53.ListHostedZones(input)
 		if err != nil {
-			ad.dnsErrors.Inc()
+			dnsErrors.Inc()
 			if awsErr, ok := err.(awserr.Error); ok {
 				switch awsErr.Code() {
 				case route53.ErrCodeThrottlingException:
@@ -274,95 +176,118 @@ func (ad *AWSData) getAWSZoneNames() (map[string]string, error) {
 	return allZones, nil
 }
 
-func (ad *AWSData) getAWSInfo() {
-	for {
+//Main AWS loop on its own goRoutine
+func (ad *AWSData) loop() {
+	ad.getAWSInfo()
+	for ad.running {
 		log.Trace("Loop Start")
 		start := time.Now()
-		change := sets.NewSet()
-		for _, zid := range ad.zones {
-			data, err := ad.getAWSZoneInfo(zid)
+		select {
+		case ac := <-ad.hostChange:
+			err := ad.doSetAddress(ac)
 			if err != nil {
-				log.Warn("Problems reading from zone:{}, {}", zid, err)
-			} else {
-				for host, s := range data {
-					if cips, ok := ad.awsHosts.Load(host); ok {
-						cips_set := cips.(sets.Set)
-						dips := cips_set.Difference(s)
-						if dips.Cardinality() > 0 {
-							change.Add(host)
-						}
-					} else {
-						change.Add(host)
-					}
-					ad.awsHosts.Store(host, s)
-				}
+				log.Warn("got error setting DNS:{}, {}", ac, err)
 			}
+			break
+		case <-ad.forceUpdate:
+			log.Trace("AWS force Update")
+			ad.getAWSInfo()
+		case <-time.After(ad.delay - time.Since(start)):
+			log.Trace("Hit AWS update timeout")
+			ad.getAWSInfo()
 		}
 		loopTime := time.Since(start).Seconds()
-		ad.dnsLoopLatency.Observe(loopTime)
+		dnsLoopLatency.Observe(loopTime)
 		log.Trace("Loop End: {}s", fmt.Sprintf("%.4f", loopTime))
-		if change.Cardinality() > 0 {
-			change.Each(func(i interface{}) bool {
-				ad.notifyChannel <- i.(string)
-				return false
-			})
-		}
-		select {
-		case <-ad.forceUpdate:
-		case <-time.After(ad.delay - time.Since(start)):
-		}
+	}
+	if ad.running {
+		log.Warn("Exited main loop w/o shuttdown!")
 	}
 }
 
-func (ad *AWSData) getAWSZoneInfo(zid string) (map[string]sets.Set, error) {
-	ad.lockUpdate.Lock()
-	defer ad.lockUpdate.Unlock()
-	dns := make(map[string]sets.Set)
-	timer := prometheus.NewTimer(ad.dnsCheckLatency)
-	rrsl := make([]route53.ResourceRecordSet, 0, 10)
-	var rso *route53.ListResourceRecordSetsOutput = &route53.ListResourceRecordSetsOutput{}
+//main setAddress command, runs in main loop
+func (ad *AWSData) doSetAddress(awsa khostdns.Arecord) error {
+	log.Info("Processing SetAddress call: HOST:{} IPS:{}", awsa.GetHostname(), awsa.GetIps())
+	newSet := sets.NewSet()
+	for _, v := range awsa.GetIps() {
+		newSet.Add(v)
+	}
 
-	for {
-		input := &route53.ListResourceRecordSetsInput{
-			HostedZoneId:          aws.String(zid),
-			StartRecordIdentifier: rso.NextRecordIdentifier,
-			StartRecordName:       rso.NextRecordName,
-			StartRecordType:       rso.NextRecordType,
+	origSet := sets.NewSet()
+	if v, ok := ad.awsHosts.Load(awsa.GetHostname()); ok {
+		origList := v.(khostdns.Arecord).GetIps()
+		for _, v := range origList {
+			origSet.Add(v)
 		}
-		rsoTmp, err := ad.r53.ListResourceRecordSets(input)
+	} else {
+		origSet = sets.NewSet()
+	}
+	log.Info("SetAddress HOST:{} NEW:{} CURRENT:{}", awsa.GetHostname(), newSet, origSet)
+	if newSet.SymmetricDifference(origSet).Cardinality() > 0 {
+		var zid string
+		ad.zoneNames.Range(func(key interface{}, value interface{}) bool {
+			sv := value.(string)
+			if strings.HasSuffix(awsa.GetHostname(), sv) {
+				zid = key.(string)
+				return false
+			}
+			return true
+		})
+		log.Info("Setting zid:{} host:{} to IPS:{} was:{}", zid, awsa.GetHostname(), newSet.ToSlice(), origSet.ToSlice())
+
+		var crrsr *route53.ChangeResourceRecordSetsOutput
+		var err error = nil
+		crrsr, err = UpdateR53(ad.r53, awsa, zid, 10)
+		if err != nil && crrsr == nil {
+			return err
+		}
+		log.Info("Waiting for Route53 to update host:{}", awsa.GetHostname())
+		err = ad.r53.WaitUntilResourceRecordSetsChanged(&route53.GetChangeInput{Id: crrsr.ChangeInfo.Id})
 		if err != nil {
-			if strings.Contains(err.Error(), "Throttling:") {
-				ad.dnsThrottles.Inc()
-				log.Debug("Hit throttle {}", err.Error())
-				continue
-			}
-			ad.dnsErrors.Inc()
-			log.Warn("ERROR: {}", err.Error())
-			return nil, err
+			dnsErrors.Inc()
+			return err
 		}
-		rso = rsoTmp
-		for _, rrs := range rso.ResourceRecordSets {
-			tmp := *rrs.Name
-			name := tmp[:len(tmp)-1]
-			if *rrs.Type == "A" && rrs.ResourceRecords != nil && ad.checkDNSFilter(name) == nil {
-				rrsl = append(rrsl, *rrs)
-				var ips sets.Set
-				if cips, ok := dns[name]; ok {
-					ips = cips
+		log.Info("Done Setting DNS:{}", awsa)
+		ad.awsHosts.Store(awsa.GetHostname(), awsa)
+	} else {
+		log.Info("Setting host:{} already set to IPS:{}", awsa.GetHostname(), origSet.ToSlice())
+	}
+
+	return nil
+}
+
+//Populates the current needed host info from AWS
+func (ad *AWSData) getAWSInfo() {
+	log.Trace("GetInfo Start")
+	change := sets.NewSet()
+	for _, zid := range ad.zones {
+		data, err := GetAWSZoneInfo(ad.r53, ad.dnsfilters, zid)
+		if err != nil {
+			log.Warn("Problems reading from zone:{}, {}", zid, err)
+		} else {
+			for host, s := range data {
+				ar := khostdns.CreateArecord(host, s)
+				if cips, ok := ad.awsHosts.Load(host); ok {
+					cipsl := cips.(khostdns.Arecord).GetIps()
+					if !cmp.Equal(cipsl, s) {
+						log.Trace("Found host change:{} ips:{}", host, s)
+						change.Add(ar)
+					}
 				} else {
-					ips = sets.NewSet()
-					dns[name] = ips
+					log.Trace("Found new host:{} ips:{}", host, s)
+					change.Add(ar)
 				}
-				for _, rr := range rrs.ResourceRecords {
-					ips.Add(*rr.Value)
-				}
-				dns[name] = ips
+				ad.awsHosts.Store(host, ar)
 			}
-		}
-		if !*rso.IsTruncated {
-			break
 		}
 	}
-	timer.ObserveDuration()
-	return dns, nil
+	if change.Cardinality() > 0 {
+		change.Each(func(i interface{}) bool {
+			ar2 := i.(khostdns.Arecord)
+			log.Trace("notify changes:{} ips:{}", ar2.GetHostname(), ar2.GetIps())
+			ad.notifyChannel <- ar2
+			return false
+		})
+	}
+	log.Trace("GetInfo End")
 }
