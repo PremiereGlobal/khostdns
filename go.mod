@@ -10,7 +10,7 @@ replace (
 )
 
 require (
-	github.com/PremiereGlobal/stim v0.1.6
+	github.com/PremiereGlobal/stim v0.1.8-0.20200913195103-d74a1dc40247
 	github.com/aws/aws-sdk-go v1.25.6
 	github.com/cornelk/hashmap v1.0.1 // indirect
 	github.com/deckarep/golang-set v1.7.1
