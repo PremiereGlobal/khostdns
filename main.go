@@ -26,16 +26,15 @@ type PromStats struct {
 	dnsUpdateErrors prometheus.Counter
 }
 
-var log2 stimlog.StimLogger = stimlog.GetLogger() //Fix for deadlock
 var log stimlog.StimLogger = stimlog.GetLoggerWithPrefix("Watch")
 var version string
+var config = viper.New()
 
 func main() {
 	lc := stimlog.GetLoggerConfig()
 	lc.SetLevel(stimlog.InfoLevel)
 	lc.ForceFlush(true)
 
-	config := viper.New()
 	config.SetEnvPrefix("khostdns")
 	config.AutomaticEnv()
 	if version == "" || version == "lastest" {
@@ -46,89 +45,7 @@ func main() {
 		Use:   "khostdns",
 		Short: "launches the khostdns service",
 		Long:  "launches the khostdns service",
-		Run: func(cmd *cobra.Command, args []string) {
-
-			if config.GetBool("version") {
-				fmt.Printf("%s\n", version)
-				os.Exit(0)
-			}
-
-			stats := &PromStats{
-				totalEvents: promauto.NewCounter(prometheus.CounterOpts{
-					Name: "khostdns_events_total",
-					Help: "The total number of host/ip notifications",
-				}),
-				dnsUpdateEvents: promauto.NewCounter(prometheus.CounterOpts{
-					Name: "khostdns_dns_changes_total",
-					Help: "The total number of DNS modifications made",
-				}),
-				dnsUpdateErrors: promauto.NewCounter(prometheus.CounterOpts{
-					Name: "khostdns_dns_errors_total",
-					Help: "The total number of DNS modifications errors",
-				}),
-			}
-			if config.GetString("awszones") == "" {
-				log.Warn("No awszones found!")
-				cmd.Help()
-				os.Exit(1)
-			}
-
-			if config.GetString("dnsfilters") == "" {
-				log.Warn("No filter found!")
-				cmd.Help()
-				os.Exit(1)
-			}
-			switch strings.ToLower(config.GetString("loglevel")) {
-			case "info":
-				lc.SetLevel(stimlog.InfoLevel)
-			case "warn":
-				lc.SetLevel(stimlog.WarnLevel)
-			case "debug":
-				lc.SetLevel(stimlog.DebugLevel)
-			case "trace":
-				lc.SetLevel(stimlog.TraceLevel)
-			}
-
-			czids := strings.Split(config.GetString("awszones"), ",")
-			zids := make([]string, 0, len(czids))
-			for _, v := range czids {
-				if strings.HasPrefix(v, "/hostedzone/") {
-					zids = append(zids, v)
-				} else if strings.HasPrefix(v, "/") && strings.Count(v, "/") == 1 {
-					zids = append(zids, fmt.Sprintf("%s%s", "/hostedzone", v))
-				} else if !strings.HasPrefix(v, "/") && strings.Count(v, "/") == 0 {
-					zids = append(zids, fmt.Sprintf("%s%s", "/hostedzone/", v))
-				} else {
-					log.Fatal("Could not parse zone id:{}", v)
-				}
-			}
-
-			filters := strings.Split(config.GetString("dnsfilters"), ",")
-
-			var dnsP khostdns.DNSSetter
-			dnsP, err := awsr53.NewAWS(zids, filters, time.Minute*5)
-			if err != nil {
-				log2.Fatal(err)
-			}
-
-			kw, err := kubeWatcher.NewKube(filters)
-			if err != nil {
-				log2.Fatal(err)
-			}
-			mip := config.GetString("metricsIP")
-			if mip == "0.0.0.0" {
-				mip = ""
-			}
-			mipp := fmt.Sprintf("%s:%s", mip, config.GetString("metricsPort"))
-			http.Handle("/metrics", promhttp.Handler())
-			time.Sleep(1) //Let some stats run before we start
-			log2.Info("metrics listening on http://{}", mipp)
-			go http.ListenAndServe(mipp, nil)
-			startWatching(dnsP, kw, stats)
-			for {
-				time.Sleep(time.Minute * 5)
-			}
-		},
+		Run:   runCMD,
 	}
 	cmd.PersistentFlags().String("awszones", "", "AWS zones to watch (/hostedzone/ZID1,/hostedzone/ZID2)")
 	cmd.MarkFlagRequired("awszones")
@@ -146,17 +63,103 @@ func main() {
 
 	err := cmd.Execute()
 	if err != nil {
-		log2.Fatal(err)
+		log.Fatal(err)
 	}
+}
+
+func runCMD(cmd *cobra.Command, args []string) {
+	lc := stimlog.GetLoggerConfig()
+	if config.GetBool("version") {
+		fmt.Printf("%s\n", version)
+		os.Exit(0)
+	}
+
+	stats := &PromStats{
+		totalEvents: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "khostdns_events_total",
+			Help: "The total number of host/ip notifications",
+		}),
+		dnsUpdateEvents: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "khostdns_dns_changes_total",
+			Help: "The total number of DNS modifications made",
+		}),
+		dnsUpdateErrors: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "khostdns_dns_errors_total",
+			Help: "The total number of DNS modifications errors",
+		}),
+	}
+	if config.GetString("awszones") == "" {
+		log.Warn("No awszones found!")
+		cmd.Help()
+		os.Exit(1)
+	}
+
+	if config.GetString("dnsfilters") == "" {
+		log.Warn("No filter found!")
+		cmd.Help()
+		os.Exit(1)
+	}
+	switch strings.ToLower(config.GetString("loglevel")) {
+	case "info":
+		lc.SetLevel(stimlog.InfoLevel)
+	case "warn":
+		lc.SetLevel(stimlog.WarnLevel)
+	case "debug":
+		lc.SetLevel(stimlog.DebugLevel)
+	case "trace":
+		lc.SetLevel(stimlog.TraceLevel)
+	}
+
+	czids := strings.Split(config.GetString("awszones"), ",")
+	zids := make([]string, 0, len(czids))
+	for _, v := range czids {
+		if strings.HasPrefix(v, "/hostedzone/") {
+			zids = append(zids, v)
+		} else if strings.HasPrefix(v, "/") && strings.Count(v, "/") == 1 {
+			zids = append(zids, fmt.Sprintf("%s%s", "/hostedzone", v))
+		} else if !strings.HasPrefix(v, "/") && strings.Count(v, "/") == 0 {
+			zids = append(zids, fmt.Sprintf("%s%s", "/hostedzone/", v))
+		} else {
+			log.Fatal("Could not parse zone id:{}", v)
+		}
+	}
+
+	filters := strings.Split(config.GetString("dnsfilters"), ",")
+
+	var dnsP khostdns.DNSSetter
+	dnsP, err := awsr53.NewAWS(zids, filters, time.Minute*5)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Info("Setting up KubeWatcher")
+	kw, err := kubeWatcher.NewKube(filters)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Info("KubeWatcher Setup")
+	mip := config.GetString("metricsIP")
+	if mip == "0.0.0.0" {
+		mip = ""
+	}
+	mipp := fmt.Sprintf("%s:%s", mip, config.GetString("metricsPort"))
+	http.Handle("/metrics", promhttp.Handler())
+	time.Sleep(1) //Let some stats run before we start
+	log.Info("metrics listening on http://{}", mipp)
+	go http.ListenAndServe(mipp, nil)
+	startWatching(dnsP, kw, stats)
 }
 
 func startWatching(dnsP khostdns.DNSSetter, kw *kubeWatcher.KubeWatcher, stats *PromStats) {
 
 	var currentSleep time.Duration
 	defaultSleep := time.Minute
+	shortSleep := time.Second * 5
 	currentSleep = defaultSleep
 	log.Info("----Start Watch Loop----")
 	hostSet := sets.NewSet()
+	delayTimer := time.NewTimer(defaultSleep)
+	pendingChanges := 0
 	for {
 		select {
 		case <-time.After(currentSleep):
@@ -176,19 +179,37 @@ func startWatching(dnsP khostdns.DNSSetter, kw *kubeWatcher.KubeWatcher, stats *
 				return false
 			})
 			hostSet.Clear()
-			currentSleep = defaultSleep
+			delayTimer.Reset(defaultSleep)
+			pendingChanges = 0
 		case changedHost := <-kw.GetNotifyChannel():
 			stats.totalEvents.Inc()
 			log.Debug("Got update from kube for host:{}", changedHost)
 			hostSet.Add(changedHost)
-			currentSleep = time.Second * 5
+			pendingChanges++
+			if pendingChanges < 5 {
+				resetTimer(delayTimer, shortSleep)
+			} else {
+				resetTimer(delayTimer, 0)
+			}
 		case changedHost := <-dnsP.GetDNSUpdater():
 			stats.totalEvents.Inc()
 			log.Debug("Got update from DNSProvider for host:{}", changedHost)
 			hostSet.Add(changedHost.GetHostname())
-			currentSleep = time.Second * 5
+			pendingChanges++
+			if pendingChanges < 5 {
+				resetTimer(delayTimer, shortSleep)
+			} else {
+				resetTimer(delayTimer, 0)
+			}
 		}
 	}
+}
+
+func resetTimer(timer *time.Timer, delay time.Duration) {
+	if !timer.Stop() {
+		<-timer.C
+	}
+	timer.Reset(delay)
 }
 
 func checkHost(dnsp khostdns.DNSSetter, kube *kubeWatcher.KubeWatcher, host string, stats *PromStats) {

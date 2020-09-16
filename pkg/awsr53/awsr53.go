@@ -9,7 +9,6 @@ import (
 	"github.com/PremiereGlobal/khostdns/pkg/khostdns"
 	"github.com/PremiereGlobal/stim/pkg/stimlog"
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/route53"
 	sets "github.com/deckarep/golang-set"
@@ -64,6 +63,7 @@ type AWSData struct {
 
 //NewAWS Creates a new AWSProvider for the set zones with the set filters
 func NewAWS(zones []string, dnsfilters []string, delay time.Duration) (khostdns.DNSSetter, error) {
+	log.Info("Creating new AWS DNSSetter")
 	sess, err := session.NewSession(&aws.Config{Region: aws.String("us-east-1")})
 	if err != nil {
 		return nil, err
@@ -81,6 +81,9 @@ func NewAWS(zones []string, dnsfilters []string, delay time.Duration) (khostdns.
 		running:       false,
 	}
 	m, err := ad.getAWSZoneNames()
+	if err != nil {
+		return nil, err
+	}
 	for awsZ, name := range m {
 		for _, zid := range ad.zones {
 			if zid == awsZ {
@@ -152,15 +155,12 @@ func (ad *AWSData) getAWSZoneNames() (map[string]string, error) {
 		}
 		rsoTmp, err := ad.r53.ListHostedZones(input)
 		if err != nil {
-			dnsErrors.Inc()
-			if awsErr, ok := err.(awserr.Error); ok {
-				switch awsErr.Code() {
-				case route53.ErrCodeThrottlingException:
-					log.Debug("Hit throttle {}", err.Error())
-					continue
-				default:
-				}
+			if isAWSThrottleError(err) {
+				dnsThrottles.Inc()
+				log.Debug("Hit throttle {}", err.Error())
+				continue
 			}
+			dnsErrors.Inc()
 			log.Warn("ERROR: {}", err.Error())
 			return nil, err
 		}
@@ -179,9 +179,14 @@ func (ad *AWSData) getAWSZoneNames() (map[string]string, error) {
 //Main AWS loop on its own goRoutine
 func (ad *AWSData) loop() {
 	ad.getAWSInfo()
+	delayTimer := time.NewTimer(ad.delay)
 	for ad.running {
 		log.Trace("Loop Start")
 		start := time.Now()
+		if !delayTimer.Stop() {
+			<-delayTimer.C
+		}
+		delayTimer.Reset(ad.delay)
 		select {
 		case ac := <-ad.hostChange:
 			err := ad.doSetAddress(ac)
@@ -192,9 +197,12 @@ func (ad *AWSData) loop() {
 		case <-ad.forceUpdate:
 			log.Trace("AWS force Update")
 			ad.getAWSInfo()
-		case <-time.After(ad.delay - time.Since(start)):
+		case <-delayTimer.C:
 			log.Trace("Hit AWS update timeout")
-			ad.getAWSInfo()
+			err := ad.getAWSInfo()
+			if err != nil {
+				log.Fatal("Problems talking to AWS:{}", err)
+			}
 		}
 		loopTime := time.Since(start).Seconds()
 		dnsLoopLatency.Observe(loopTime)
@@ -257,13 +265,14 @@ func (ad *AWSData) doSetAddress(awsa khostdns.Arecord) error {
 }
 
 //Populates the current needed host info from AWS
-func (ad *AWSData) getAWSInfo() {
+func (ad *AWSData) getAWSInfo() error {
 	log.Trace("GetInfo Start")
 	change := sets.NewSet()
 	for _, zid := range ad.zones {
 		data, err := GetAWSZoneInfo(ad.r53, ad.dnsfilters, zid)
 		if err != nil {
 			log.Warn("Problems reading from zone:{}, {}", zid, err)
+			return err
 		} else {
 			for host, s := range data {
 				ar := khostdns.CreateArecord(host, s)
@@ -290,4 +299,5 @@ func (ad *AWSData) getAWSInfo() {
 		})
 	}
 	log.Trace("GetInfo End")
+	return nil
 }

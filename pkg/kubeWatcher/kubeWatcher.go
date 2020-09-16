@@ -45,11 +45,17 @@ type KubeWatcher struct {
 	dnsfilters    []string
 	notifyChannel chan string
 	clientset     *kubernetes.Clientset
-	dnsChanges    prometheus.Counter
-	currentHosts  prometheus.Gauge
 }
 
-var log2 stimlog.StimLogger = stimlog.GetLogger() //Fix for deadlock
+var dnsChanges = promauto.NewCounter(prometheus.CounterOpts{
+	Name: "khostdns_kube_changes_total",
+	Help: "The total number of hostdns changes from kubernetes",
+})
+var currentHosts = promauto.NewGauge(prometheus.GaugeOpts{
+	Name: "khostdns_kube_hosts_current",
+	Help: "The current number of hostdns entries in the cluster",
+})
+
 var log stimlog.StimLogger = stimlog.GetLoggerWithPrefix("KUBE")
 
 func NewKube(dnsfilters []string) (*KubeWatcher, error) {
@@ -82,16 +88,8 @@ func NewKube(dnsfilters []string) (*KubeWatcher, error) {
 		dnsfilters:    dnsfilters,
 		notifyChannel: make(chan string, 20),
 		clientset:     clientset,
-		dnsChanges: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "khostdns_kube_changes_total",
-			Help: "The total number of hostdns changes from kubernetes",
-		}),
-		currentHosts: promauto.NewGauge(prometheus.GaugeOpts{
-			Name: "khostdns_kube_hosts_current",
-			Help: "The current number of hostdns entries in the cluster",
-		}),
 	}
-
+	log.Info("Starting Watcher")
 	go kd.podsWatcher()
 	kd.watchPods()
 	return kd, nil
@@ -182,22 +180,31 @@ func (kd *KubeWatcher) podUpdated(old interface{}, new interface{}) {
 	pod := new.(*v1.Pod)
 	if hostdns, ok := pod.ObjectMeta.Annotations["hostdns"]; ok {
 		externalIP := kd.getPodExternalIP(pod)
-		log.Debug("Pod updated: {} - {}:{}", pod.ObjectMeta.Name, hostdns, externalIP)
+		phase := pod.Status.Phase
 		if externalIP != "" {
-			kd.addnewIP(pod.ObjectMeta.Name, hostdns, externalIP)
+			if phase == v1.PodRunning {
+				for _, v := range pod.Status.ContainerStatuses {
+					if !v.Ready {
+						log.Debug("Pod updated, NotReady: {} - {}:{}:{}:{}", pod.ObjectMeta.Name, hostdns, externalIP, phase, v.Name)
+						kd.removeIP(pod.ObjectMeta.Name, hostdns, externalIP)
+						return
+					}
+				}
+				log.Debug("Pod updated, All Ready: {} - {}:{}:{}", pod.ObjectMeta.Name, hostdns, externalIP, phase)
+				kd.addnewIP(pod.ObjectMeta.Name, hostdns, externalIP)
+			} else {
+				log.Debug("Pod updated, NotRunning: {} - {}:{}:{}", pod.ObjectMeta.Name, hostdns, externalIP, phase)
+				kd.removeIP(pod.ObjectMeta.Name, hostdns, externalIP)
+			}
+		} else {
+			log.Debug("Pod updated, Missing ExternalDNS: {} - {}:{}:{}", pod.ObjectMeta.Name, hostdns, externalIP, phase)
+			kd.removeIP(pod.ObjectMeta.Name, hostdns, externalIP)
 		}
 	}
 }
 
 func (kd *KubeWatcher) podCreated(obj interface{}) {
-	pod := obj.(*v1.Pod)
-	if hostdns, ok := pod.ObjectMeta.Annotations["hostdns"]; ok {
-		externalIP := kd.getPodExternalIP(pod)
-		log.Info("Pod created: {} - {}:{}", pod.ObjectMeta.Name, hostdns, externalIP)
-		if externalIP != "" {
-			kd.addnewIP(pod.ObjectMeta.Name, hostdns, externalIP)
-		}
-	}
+	//We ignore create and get all pods on updates
 }
 
 func (kd *KubeWatcher) addnewIP(pod_name string, host string, ipa string) {
@@ -205,16 +212,16 @@ func (kd *KubeWatcher) addnewIP(pod_name string, host string, ipa string) {
 		ips := tipl.(sets.Set)
 		if ips.Add(ipa) {
 			kd.kubeHosts.Store(host, ips)
-			kd.dnsChanges.Inc()
+			dnsChanges.Inc()
 			log.Info("host:{} added IP:{}, Current IP list:{}", host, ipa, ips.ToSlice())
 			kd.notifyChannel <- host
 		}
 	} else {
-		kd.dnsChanges.Inc()
+		dnsChanges.Inc()
 		log.Info("host:{} added IP:{}, Current IP list:[{}]", host, ipa, ipa)
 		kd.notifyChannel <- host
 	}
-	kd.currentHosts.Set(float64(len(kd.GetCurrentHosts())))
+	currentHosts.Set(float64(len(kd.GetCurrentHosts())))
 	kd.pods.Store(pod_name, PodInfo{lastIP: ipa, host: host, name: pod_name, lastSeen: time.Now()})
 }
 
@@ -241,8 +248,8 @@ func (kd *KubeWatcher) removeIP(pod_name string, host string, ipa string) {
 			log.Info("Asked to delete non-existing IP for host:{} missing IP:{}, Current IP list:{}", host, ipa, ips.ToSlice())
 		}
 	}
-	kd.currentHosts.Set(float64(len(kd.GetCurrentHosts())))
 	kd.pods.Delete(pod_name)
+	currentHosts.Set(float64(len(kd.GetCurrentHosts())))
 }
 
 func (kd *KubeWatcher) getPodExternalIP(pod *v1.Pod) string {

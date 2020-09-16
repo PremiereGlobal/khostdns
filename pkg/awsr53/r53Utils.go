@@ -2,15 +2,26 @@ package awsr53 // import "github.com/PremiereGlobal/khostdns/pkg/awsr53"
 
 import (
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/PremiereGlobal/khostdns/pkg/khostdns"
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/route53"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+func isAWSThrottleError(err error) bool {
+	switch awsErr := err.(type) {
+	case awserr.Error:
+		switch awsErr.Code() {
+		case route53.ErrCodeThrottlingException:
+			return true
+		}
+	default:
+	}
+	return false
+}
 func GetAWSZoneInfo(r53 *route53.Route53, dnsf *khostdns.DNSFilter, zid string) (map[string][]string, error) {
 	dns := make(map[string][]string)
 	timer := prometheus.NewTimer(dnsCheckLatency)
@@ -26,7 +37,8 @@ func GetAWSZoneInfo(r53 *route53.Route53, dnsf *khostdns.DNSFilter, zid string) 
 		}
 		rsoTmp, err := r53.ListResourceRecordSets(input)
 		if err != nil {
-			if strings.Contains(err.Error(), "Throttling:") {
+
+			if isAWSThrottleError(err) {
 				dnsThrottles.Inc()
 				log.Debug("Hit throttle {}", err.Error())
 				continue
@@ -72,6 +84,8 @@ func UpdateR53(r53 *route53.Route53, awsa khostdns.Arecord, zid string, retry in
 			rr = append(rr, nrr)
 		}
 		ttl := int64(60)
+		//var change *route53.ChangeResourceRecordSetsInput
+
 		change := &route53.ChangeResourceRecordSetsInput{
 			HostedZoneId: aws.String(zid),
 			ChangeBatch: &route53.ChangeBatch{
@@ -87,10 +101,13 @@ func UpdateR53(r53 *route53.Route53, awsa khostdns.Arecord, zid string, retry in
 					},
 				},
 			}}
-
+		if len(rr) == 0 {
+			log.Info("DNS Name {} went to 0 records, deleting entry", awsa.GetHostname())
+			change.ChangeBatch.Changes[0].Action = aws.String(route53.ChangeActionDelete)
+		}
 		crrsr, err = r53.ChangeResourceRecordSets(change)
 		if err != nil {
-			if strings.Contains(err.Error(), "Throttling:") {
+			if isAWSThrottleError(err) {
 				dnsThrottles.Inc()
 				log.Debug("Hit throttle setting dns:{} {}", awsa, err.Error())
 				time.Sleep(time.Millisecond * 500)
