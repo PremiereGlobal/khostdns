@@ -152,17 +152,15 @@ func runCMD(cmd *cobra.Command, args []string) {
 
 func startWatching(dnsP khostdns.DNSSetter, kw *kubeWatcher.KubeWatcher, stats *PromStats) {
 
-	var currentSleep time.Duration
 	defaultSleep := time.Minute
 	shortSleep := time.Second * 5
-	currentSleep = defaultSleep
 	log.Info("----Start Watch Loop----")
 	hostSet := sets.NewSet()
 	delayTimer := time.NewTimer(defaultSleep)
 	pendingChanges := 0
 	for {
 		select {
-		case <-time.After(currentSleep):
+		case <-delayTimer.C:
 			if hostSet.Cardinality() == 0 {
 				log.Debug("No Changes detected syncing hosts")
 				for _, val := range kw.GetCurrentHosts() {
@@ -186,7 +184,7 @@ func startWatching(dnsP khostdns.DNSSetter, kw *kubeWatcher.KubeWatcher, stats *
 			log.Debug("Got update from kube for host:{}", changedHost)
 			hostSet.Add(changedHost)
 			pendingChanges++
-			if pendingChanges < 5 {
+			if pendingChanges == 1 {
 				resetTimer(delayTimer, shortSleep)
 			} else {
 				resetTimer(delayTimer, 0)
