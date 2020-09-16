@@ -231,34 +231,57 @@ func (ad *AWSData) doSetAddress(awsa khostdns.Arecord) error {
 		origSet = sets.NewSet()
 	}
 	log.Info("SetAddress HOST:{} NEW:{} CURRENT:{}", awsa.GetHostname(), newSet, origSet)
-	if newSet.SymmetricDifference(origSet).Cardinality() > 0 {
-		var zid string
-		ad.zoneNames.Range(func(key interface{}, value interface{}) bool {
-			sv := value.(string)
-			if strings.HasSuffix(awsa.GetHostname(), sv) {
-				zid = key.(string)
-				return false
-			}
-			return true
-		})
-		log.Info("Setting zid:{} host:{} to IPS:{} was:{}", zid, awsa.GetHostname(), newSet.ToSlice(), origSet.ToSlice())
+	var zid string
+	ad.zoneNames.Range(func(key interface{}, value interface{}) bool {
+		sv := value.(string)
+		if strings.HasSuffix(awsa.GetHostname(), sv) {
+			zid = key.(string)
+			return false
+		}
+		return true
+	})
+	if newSet.Cardinality() == 0 && origSet.Cardinality() > 0 {
+		dawsa := khostdns.CreateArecordFromSet(awsa.GetHostname(), origSet)
+		log.Info("Deleteing DNS zid:{} host:{} IPS:{}", zid, dawsa.GetHostname(), origSet.ToSlice())
 
 		var crrsr *route53.ChangeResourceRecordSetsOutput
 		var err error = nil
-		crrsr, err = UpdateR53(ad.r53, awsa, zid, 10)
+		crrsr, err = UpdateR53(ad.r53, dawsa, zid, 10, true)
 		if err != nil && crrsr == nil {
 			return err
 		}
 		log.Info("Waiting for Route53 to update host:{}", awsa.GetHostname())
 		err = ad.r53.WaitUntilResourceRecordSetsChanged(&route53.GetChangeInput{Id: crrsr.ChangeInfo.Id})
 		if err != nil {
+			log.Info("Error waiting for AWS:{}", err)
 			dnsErrors.Inc()
 			return err
 		}
 		log.Info("Done Setting DNS:{}", awsa)
 		ad.awsHosts.Store(awsa.GetHostname(), awsa)
 	} else {
-		log.Info("Setting host:{} already set to IPS:{}", awsa.GetHostname(), origSet.ToSlice())
+		if newSet.SymmetricDifference(origSet).Cardinality() > 0 {
+
+			log.Info("Setting zid:{} host:{} to IPS:{} was:{}", zid, awsa.GetHostname(), newSet.ToSlice(), origSet.ToSlice())
+
+			var crrsr *route53.ChangeResourceRecordSetsOutput
+			var err error = nil
+			crrsr, err = UpdateR53(ad.r53, awsa, zid, 10, false)
+			if err != nil && crrsr == nil {
+				return err
+			}
+			log.Info("Waiting for Route53 to update host:{}", awsa.GetHostname())
+			err = ad.r53.WaitUntilResourceRecordSetsChanged(&route53.GetChangeInput{Id: crrsr.ChangeInfo.Id})
+			if err != nil {
+				log.Info("Error waiting for AWS:{}", err)
+				dnsErrors.Inc()
+				return err
+			}
+			log.Info("Done Setting DNS:{}", awsa)
+			ad.awsHosts.Store(awsa.GetHostname(), awsa)
+		} else {
+			log.Info("Setting host:{} already set to IPS:{}", awsa.GetHostname(), origSet.ToSlice())
+		}
 	}
 
 	return nil

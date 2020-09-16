@@ -2,6 +2,8 @@ package khostdns // import "github.com/PremiereGlobal/khostdns"
 import (
 	"fmt"
 	"strings"
+
+	sets "github.com/deckarep/golang-set"
 )
 
 //DNSScraper This is the interface used to query DNS
@@ -33,6 +35,14 @@ func CreateArecord(hostname string, ips []string) Arecord {
 	lips := make([]string, len(ips))
 	copy(lips, ips)
 	return &arecord{hostName: hostname, ips: lips}
+}
+
+func CreateArecordFromSet(host string, ipset sets.Set) Arecord {
+	lips := make([]string, 0, ipset.Cardinality())
+	for _, v := range ipset.ToSlice() {
+		lips = append(lips, v.(string))
+	}
+	return &arecord{hostName: host, ips: lips}
 }
 
 func (aa *arecord) GetHostname() string {

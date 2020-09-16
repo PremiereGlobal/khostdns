@@ -1,6 +1,7 @@
 package awsr53 // import "github.com/PremiereGlobal/khostdns/pkg/awsr53"
 
 import (
+	"fmt"
 	"sort"
 	"time"
 
@@ -22,6 +23,7 @@ func isAWSThrottleError(err error) bool {
 	}
 	return false
 }
+
 func GetAWSZoneInfo(r53 *route53.Route53, dnsf *khostdns.DNSFilter, zid string) (map[string][]string, error) {
 	dns := make(map[string][]string)
 	timer := prometheus.NewTimer(dnsCheckLatency)
@@ -49,6 +51,7 @@ func GetAWSZoneInfo(r53 *route53.Route53, dnsf *khostdns.DNSFilter, zid string) 
 		}
 		rso = rsoTmp
 		for _, rrs := range rso.ResourceRecordSets {
+			fmt.Println("%V", rrs)
 			tmp := *rrs.Name
 			name := tmp[:len(tmp)-1]
 			if *rrs.Type == "A" && rrs.ResourceRecords != nil && dnsf.CheckDNSFilter(name) == nil {
@@ -72,7 +75,7 @@ func GetAWSZoneInfo(r53 *route53.Route53, dnsf *khostdns.DNSFilter, zid string) 
 	return dns, nil
 }
 
-func UpdateR53(r53 *route53.Route53, awsa khostdns.Arecord, zid string, retry int) (*route53.ChangeResourceRecordSetsOutput, error) {
+func UpdateR53(r53 *route53.Route53, awsa khostdns.Arecord, zid string, retry int, delete bool) (*route53.ChangeResourceRecordSetsOutput, error) {
 	timer := prometheus.NewTimer(dnsSetLatency)
 	defer timer.ObserveDuration()
 	var crrsr *route53.ChangeResourceRecordSetsOutput
@@ -101,10 +104,10 @@ func UpdateR53(r53 *route53.Route53, awsa khostdns.Arecord, zid string, retry in
 					},
 				},
 			}}
-		if len(rr) == 0 {
-			log.Info("DNS Name {} went to 0 records, deleting entry", awsa.GetHostname())
+		if delete {
 			change.ChangeBatch.Changes[0].Action = aws.String(route53.ChangeActionDelete)
 		}
+		fmt.Println("%V", change)
 		crrsr, err = r53.ChangeResourceRecordSets(change)
 		if err != nil {
 			if isAWSThrottleError(err) {

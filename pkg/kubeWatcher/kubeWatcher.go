@@ -86,7 +86,7 @@ func NewKube(dnsfilters []string) (*KubeWatcher, error) {
 
 	kd := &KubeWatcher{
 		dnsfilters:    dnsfilters,
-		notifyChannel: make(chan string, 20),
+		notifyChannel: make(chan string, 200),
 		clientset:     clientset,
 	}
 	log.Info("Starting Watcher")
@@ -197,14 +197,14 @@ func (kd *KubeWatcher) podUpdated(old interface{}, new interface{}) {
 				kd.removeIP(pod.ObjectMeta.Name, hostdns, externalIP)
 			}
 		} else {
-			log.Debug("Pod updated, Missing ExternalDNS: {} - {}:{}:{}", pod.ObjectMeta.Name, hostdns, externalIP, phase)
+			log.Debug("Pod updated, Missing ExternalIP: {} - {}:{}:{}", pod.ObjectMeta.Name, hostdns, externalIP, phase)
 			kd.removeIP(pod.ObjectMeta.Name, hostdns, externalIP)
 		}
 	}
 }
 
 func (kd *KubeWatcher) podCreated(obj interface{}) {
-	//We ignore create and get all pods on updates
+	kd.podUpdated(nil, obj)
 }
 
 func (kd *KubeWatcher) addnewIP(pod_name string, host string, ipa string) {
@@ -237,15 +237,24 @@ func (kd *KubeWatcher) podDeleted(obj interface{}) {
 }
 
 func (kd *KubeWatcher) removeIP(pod_name string, host string, ipa string) {
-	if tipl, ok := kd.kubeHosts.Load(host); ok {
-		ips := tipl.(sets.Set)
-		if ips.Contains(ipa) {
-			ips.Remove(ipa)
-			kd.kubeHosts.Store(host, ips)
-			log.Info("host:{} Deleted IP:{}, Current IP list:{}", host, ipa, ips.ToSlice())
-			kd.notifyChannel <- host
-		} else {
-			log.Info("Asked to delete non-existing IP for host:{} missing IP:{}, Current IP list:{}", host, ipa, ips.ToSlice())
+	removed_ip := ipa
+	if removed_ip != "" {
+		if pii, ok := kd.pods.Load(pod_name); ok {
+			pi := pii.(PodInfo)
+			removed_ip = pi.lastIP
+		}
+	}
+	if removed_ip != "" {
+		if tipl, ok := kd.kubeHosts.Load(host); ok {
+			ips := tipl.(sets.Set)
+			if ips.Contains(removed_ip) {
+				ips.Remove(removed_ip)
+				kd.kubeHosts.Store(host, ips)
+				log.Info("host:{} Deleted IP:{}, Current IP list:{}", host, removed_ip, ips.ToSlice())
+				kd.notifyChannel <- host
+			} else {
+				log.Info("Asked to delete non-existing IP for host:{} missing IP:{}, Current IP list:{}", host, ipa, ips.ToSlice())
+			}
 		}
 	}
 	kd.pods.Delete(pod_name)

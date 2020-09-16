@@ -151,7 +151,6 @@ func runCMD(cmd *cobra.Command, args []string) {
 }
 
 func startWatching(dnsP khostdns.DNSSetter, kw *kubeWatcher.KubeWatcher, stats *PromStats) {
-
 	defaultSleep := time.Minute
 	shortSleep := time.Second * 5
 	log.Info("----Start Watch Loop----")
@@ -186,18 +185,14 @@ func startWatching(dnsP khostdns.DNSSetter, kw *kubeWatcher.KubeWatcher, stats *
 			pendingChanges++
 			if pendingChanges == 1 {
 				resetTimer(delayTimer, shortSleep)
-			} else {
-				resetTimer(delayTimer, 0)
 			}
 		case changedHost := <-dnsP.GetDNSUpdater():
 			stats.totalEvents.Inc()
 			log.Debug("Got update from DNSProvider for host:{}", changedHost)
 			hostSet.Add(changedHost.GetHostname())
 			pendingChanges++
-			if pendingChanges < 5 {
+			if pendingChanges == 1 {
 				resetTimer(delayTimer, shortSleep)
-			} else {
-				resetTimer(delayTimer, 0)
 			}
 		}
 	}
