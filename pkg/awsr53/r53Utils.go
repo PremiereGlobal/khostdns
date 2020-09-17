@@ -1,7 +1,6 @@
 package awsr53 // import "github.com/PremiereGlobal/khostdns/pkg/awsr53"
 
 import (
-	"fmt"
 	"sort"
 	"time"
 
@@ -51,7 +50,6 @@ func GetAWSZoneInfo(r53 *route53.Route53, dnsf *khostdns.DNSFilter, zid string) 
 		}
 		rso = rsoTmp
 		for _, rrs := range rso.ResourceRecordSets {
-			fmt.Println("%V", rrs)
 			tmp := *rrs.Name
 			name := tmp[:len(tmp)-1]
 			if *rrs.Type == "A" && rrs.ResourceRecords != nil && dnsf.CheckDNSFilter(name) == nil {
@@ -107,7 +105,6 @@ func UpdateR53(r53 *route53.Route53, awsa khostdns.Arecord, zid string, retry in
 		if delete {
 			change.ChangeBatch.Changes[0].Action = aws.String(route53.ChangeActionDelete)
 		}
-		fmt.Println("%V", change)
 		crrsr, err = r53.ChangeResourceRecordSets(change)
 		if err != nil {
 			if isAWSThrottleError(err) {
