@@ -3,6 +3,7 @@ package main // import "github.com/PremiereGlobal/khostdns"
 import (
 	"fmt"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"strings"
 	"time"
@@ -60,6 +61,8 @@ func main() {
 	config.BindPFlag("loglevel", cmd.PersistentFlags().Lookup("loglevel"))
 	cmd.PersistentFlags().Bool("version", false, "prints the version the exits")
 	config.BindPFlag("version", cmd.PersistentFlags().Lookup("version"))
+	cmd.PersistentFlags().String("debugaddr", "", "enable debug Address")
+	config.BindPFlag("debugaddr", cmd.PersistentFlags().Lookup("debugaddr"))
 
 	err := cmd.Execute()
 	if err != nil {
@@ -92,6 +95,10 @@ func runCMD(cmd *cobra.Command, args []string) {
 		log.Warn("No awszones found!")
 		cmd.Help()
 		os.Exit(1)
+	}
+
+	if config.GetString("debugaddr") != "" {
+		startDebugService(config.GetString("debugaddr"))
 	}
 
 	if config.GetString("dnsfilters") == "" {
@@ -232,4 +239,27 @@ func checkHost(dnsp khostdns.DNSSetter, kube *kubeWatcher.KubeWatcher, host stri
 	} else {
 		log.Info("Host:{}, No changes Needed IPs:{}", host, kubeIPs)
 	}
+}
+
+func startDebugService(addr string) {
+	dmux := http.NewServeMux()
+	dmuxServer := &http.Server{
+		Addr:           addr,
+		Handler:        dmux,
+		MaxHeaderBytes: 256 * 1024,
+	}
+	dmux.HandleFunc("/debug/pprof/", pprof.Index)
+	dmux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	dmux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	dmux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+
+	// Manually add support for paths linked to by index page at /debug/pprof/
+	dmux.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
+	dmux.Handle("/debug/pprof/heap", pprof.Handler("heap"))
+	dmux.Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
+	dmux.Handle("/debug/pprof/block", pprof.Handler("block"))
+	go func() {
+		err := dmuxServer.ListenAndServe()
+		log.Warn("Got error with debug service:{}", err)
+	}()
 }

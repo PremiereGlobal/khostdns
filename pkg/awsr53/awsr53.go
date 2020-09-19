@@ -17,7 +17,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
-var log2 stimlog.StimLogger = stimlog.GetLogger() //Fix for deadlock
 var log stimlog.StimLogger = stimlog.GetLoggerWithPrefix("AWS")
 
 var dnsThrottles = promauto.NewCounter(prometheus.CounterOpts{
@@ -181,24 +180,25 @@ func (ad *AWSData) loop() {
 	ad.getAWSInfo()
 	delayTimer := time.NewTimer(ad.delay)
 	for ad.running {
-		log.Trace("Loop Start")
 		start := time.Now()
 		if !delayTimer.Stop() {
 			<-delayTimer.C
 		}
 		delayTimer.Reset(ad.delay)
+		log.Trace("Loop Start")
 		select {
 		case ac := <-ad.hostChange:
+			log.Trace("Loop:Changing Host")
 			err := ad.doSetAddress(ac)
 			if err != nil {
 				log.Warn("got error setting DNS:{}, {}", ac, err)
 			}
 			break
 		case <-ad.forceUpdate:
-			log.Trace("AWS force Update")
+			log.Trace("Loop:AWS force Update")
 			ad.getAWSInfo()
 		case <-delayTimer.C:
-			log.Trace("Hit AWS update timeout")
+			log.Trace("Loop:Hit AWS update timeout")
 			err := ad.getAWSInfo()
 			if err != nil {
 				log.Fatal("Problems talking to AWS:{}", err)

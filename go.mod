@@ -11,15 +11,14 @@ replace (
 
 require (
 	github.com/PremiereGlobal/stim v0.1.8-0.20200913195103-d74a1dc40247
-	github.com/aws/aws-sdk-go v1.25.6
+	github.com/aws/aws-sdk-go v1.34.27
 	github.com/cornelk/hashmap v1.0.1 // indirect
 	github.com/deckarep/golang-set v1.7.1
 	github.com/google/go-cmp v0.3.1
 	github.com/prometheus/client_golang v1.1.0
 	github.com/spf13/afero v1.2.2 // indirect
-	github.com/spf13/cobra v0.0.5
-	github.com/spf13/viper v1.4.0
-	golang.org/x/oauth2 v0.0.0-20190604053449-0f29369cfe45 // indirect
+	github.com/spf13/cobra v1.0.0
+	github.com/spf13/viper v1.7.1
 	golang.org/x/time v0.0.0-20190921001708-c4c64cad1fd0 // indirect
 	k8s.io/api v0.0.0-20190409092523-d687e77c8ae9
 	k8s.io/apimachinery v0.0.0-20190409092423-760d1845f48b
