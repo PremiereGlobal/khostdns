@@ -178,13 +178,10 @@ func (ad *AWSData) getAWSZoneNames() (map[string]string, error) {
 //Main AWS loop on its own goRoutine
 func (ad *AWSData) loop() {
 	ad.getAWSInfo()
-	delayTimer := time.NewTimer(ad.delay)
+
 	for ad.running {
 		start := time.Now()
-		if !delayTimer.Stop() {
-			<-delayTimer.C
-		}
-		delayTimer.Reset(ad.delay)
+		delayTimer := time.NewTimer(ad.delay)
 		log.Trace("Loop Start")
 		select {
 		case ac := <-ad.hostChange:
@@ -193,7 +190,6 @@ func (ad *AWSData) loop() {
 			if err != nil {
 				log.Warn("got error setting DNS:{}, {}", ac, err)
 			}
-			break
 		case <-ad.forceUpdate:
 			log.Trace("Loop:AWS force Update")
 			ad.getAWSInfo()
@@ -204,6 +200,7 @@ func (ad *AWSData) loop() {
 				log.Fatal("Problems talking to AWS:{}", err)
 			}
 		}
+		delayTimer.Stop()
 		loopTime := time.Since(start).Seconds()
 		dnsLoopLatency.Observe(loopTime)
 		log.Trace("Loop End: {}s", fmt.Sprintf("%.4f", loopTime))

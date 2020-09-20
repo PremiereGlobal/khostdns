@@ -162,8 +162,8 @@ func startWatching(dnsP khostdns.DNSSetter, kw *kubeWatcher.KubeWatcher, stats *
 	shortSleep := time.Second * 5
 	log.Info("----Start Watch Loop----")
 	hostSet := sets.NewSet()
-	delayTimer := time.NewTimer(defaultSleep)
 	pendingChanges := 0
+	delayTimer := time.NewTimer(defaultSleep)
 	for {
 		select {
 		case <-delayTimer.C:
@@ -206,8 +206,10 @@ func startWatching(dnsP khostdns.DNSSetter, kw *kubeWatcher.KubeWatcher, stats *
 }
 
 func resetTimer(timer *time.Timer, delay time.Duration) {
-	if !timer.Stop() {
-		<-timer.C
+	timer.Stop()
+	select {
+	case <-timer.C:
+	default:
 	}
 	timer.Reset(delay)
 }
