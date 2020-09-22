@@ -63,6 +63,8 @@ func main() {
 	config.BindPFlag("version", cmd.PersistentFlags().Lookup("version"))
 	cmd.PersistentFlags().String("debugaddr", "", "enable debug Address")
 	config.BindPFlag("debugaddr", cmd.PersistentFlags().Lookup("debugaddr"))
+	cmd.PersistentFlags().Int("dnssync", 10, "time in minutes to do DNS sync")
+	config.BindPFlag("dnssync", cmd.PersistentFlags().Lookup("dnssync"))
 
 	err := cmd.Execute()
 	if err != nil {
@@ -131,10 +133,13 @@ func runCMD(cmd *cobra.Command, args []string) {
 		}
 	}
 
+	dnsDelayTime := time.Duration(config.GetInt("dnssync")) * time.Minute
+	log.Info("DNS Sync Delay time: {}", dnsDelayTime)
+
 	filters := strings.Split(config.GetString("dnsfilters"), ",")
 
 	var dnsP khostdns.DNSSetter
-	dnsP, err := awsr53.NewAWS(zids, filters, time.Minute*5)
+	dnsP, err := awsr53.NewAWS(zids, filters, dnsDelayTime)
 	if err != nil {
 		log.Fatal(err)
 	}
