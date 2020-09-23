@@ -105,6 +105,7 @@ func UpdateR53(r53 *route53.Route53, awsa khostdns.Arecord, zid string, retry in
 		if delete {
 			change.ChangeBatch.Changes[0].Action = aws.String(route53.ChangeActionDelete)
 		}
+		// fmt.Println(change)
 		crrsr, err = r53.ChangeResourceRecordSets(change)
 		if err != nil {
 			if isAWSThrottleError(err) {

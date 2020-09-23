@@ -159,6 +159,7 @@ func (kd *KubeWatcher) podsWatcher() {
 		kd.pods.Range(func(pn interface{}, podi interface{}) bool {
 			name := pn.(string)
 			pod := podi.(PodInfo)
+			log.Debug("Cleanup: Checking pod: {}: lastSeen:{}", name, time.Since(pod.lastSeen))
 			if time.Since(pod.lastSeen) > time.Minute {
 				cleanup = append(cleanup, name)
 			}
@@ -179,6 +180,10 @@ func (kd *KubeWatcher) podsWatcher() {
 func (kd *KubeWatcher) podUpdated(old interface{}, new interface{}) {
 	pod := new.(*v1.Pod)
 	if hostdns, ok := pod.ObjectMeta.Annotations["hostdns"]; ok {
+		err := kd.checkDNSFilter(hostdns)
+		if err != nil {
+			return
+		}
 		externalIP := kd.getPodExternalIP(pod)
 		phase := pod.Status.Phase
 		if externalIP != "" {
@@ -230,21 +235,20 @@ func (kd *KubeWatcher) podDeleted(obj interface{}) {
 	if hostdns, ok := pod.ObjectMeta.Annotations["hostdns"]; ok {
 		externalIP := kd.getPodExternalIP(pod)
 		log.Info("Pod deleted: {} - {}", pod.ObjectMeta.Name, externalIP)
-		if externalIP != "" {
-			kd.removeIP(pod.ObjectMeta.Name, hostdns, externalIP)
-		}
+		kd.removeIP(pod.ObjectMeta.Name, hostdns, externalIP)
 	}
 }
 
 func (kd *KubeWatcher) removeIP(pod_name string, host string, ipa string) {
 	removed_ip := ipa
-	if removed_ip != "" {
+	if removed_ip == "" {
 		if pii, ok := kd.pods.Load(pod_name); ok {
 			pi := pii.(PodInfo)
 			removed_ip = pi.lastIP
 		}
 	}
 	if removed_ip != "" {
+		log.Info("removeIP for:{}, pod:{}, ip:{}", host, pod_name, removed_ip)
 		if tipl, ok := kd.kubeHosts.Load(host); ok {
 			ips := tipl.(sets.Set)
 			if ips.Contains(removed_ip) {

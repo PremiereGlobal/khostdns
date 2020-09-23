@@ -247,6 +247,7 @@ func (ad *AWSData) doSetAddress(awsa khostdns.Arecord) error {
 		if err != nil && crrsr == nil {
 			return err
 		}
+		awsWaitTime := time.Now()
 		log.Info("Waiting for Route53 to update host:{}", awsa.GetHostname())
 		err = ad.r53.WaitUntilResourceRecordSetsChanged(&route53.GetChangeInput{Id: crrsr.ChangeInfo.Id})
 		if err != nil {
@@ -254,7 +255,7 @@ func (ad *AWSData) doSetAddress(awsa khostdns.Arecord) error {
 			dnsErrors.Inc()
 			return err
 		}
-		log.Info("Done Setting DNS:{}", awsa)
+		log.Info("Done Setting DNS:{}, took:{}", awsa, time.Since(awsWaitTime))
 		ad.awsHosts.Store(awsa.GetHostname(), awsa)
 	} else {
 		if newSet.SymmetricDifference(origSet).Cardinality() > 0 {
@@ -267,6 +268,7 @@ func (ad *AWSData) doSetAddress(awsa khostdns.Arecord) error {
 			if err != nil && crrsr == nil {
 				return err
 			}
+			awsWaitTime := time.Now()
 			log.Info("Waiting for Route53 to update host:{}", awsa.GetHostname())
 			err = ad.r53.WaitUntilResourceRecordSetsChanged(&route53.GetChangeInput{Id: crrsr.ChangeInfo.Id})
 			if err != nil {
@@ -274,7 +276,7 @@ func (ad *AWSData) doSetAddress(awsa khostdns.Arecord) error {
 				dnsErrors.Inc()
 				return err
 			}
-			log.Info("Done Setting DNS:{}", awsa)
+			log.Info("Done Setting DNS:{}, took:{}", awsa, time.Since(awsWaitTime))
 			ad.awsHosts.Store(awsa.GetHostname(), awsa)
 		} else {
 			log.Info("Setting host:{} already set to IPS:{}", awsa.GetHostname(), origSet.ToSlice())
