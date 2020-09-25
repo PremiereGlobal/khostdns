@@ -179,33 +179,44 @@ func (kd *KubeWatcher) podsWatcher() {
 
 func (kd *KubeWatcher) podUpdated(old interface{}, new interface{}) {
 	pod := new.(*v1.Pod)
-	if hostdns, ok := pod.ObjectMeta.Annotations["hostdns"]; ok {
-		err := kd.checkDNSFilter(hostdns)
-		if err != nil {
+	hostdns, ok := pod.ObjectMeta.Annotations["hostdns"]
+	if !ok {
+		return
+	}
+	err := kd.checkDNSFilter(hostdns)
+	if err != nil {
+		return
+	}
+	externalIP := kd.getPodExternalIP(pod)
+	phase := pod.Status.Phase
+	if externalIP == "" {
+		log.Debug("Pod updated, Missing ExternalIP: {} - {}:{}:{}", pod.ObjectMeta.Name, hostdns, externalIP, phase)
+		kd.removeIP(pod.ObjectMeta.Name, hostdns, externalIP)
+		return
+	}
+	dt := pod.DeletionTimestamp
+	if dt != nil {
+		log.Debug("Pod MArked as being deleted (its terminating) removing:{} - {}:{}:{}", pod.ObjectMeta.Name, hostdns, externalIP, phase)
+		kd.removeIP(pod.ObjectMeta.Name, hostdns, externalIP)
+		return
+	}
+	if phase != v1.PodRunning {
+		log.Debug("Pod updated, NotRunning: {} - {}:{}:{}", pod.ObjectMeta.Name, hostdns, externalIP, phase)
+		kd.removeIP(pod.ObjectMeta.Name, hostdns, externalIP)
+		return
+	}
+
+	for _, v := range pod.Status.ContainerStatuses {
+		if !v.Ready {
+			log.Debug("Pod updated, NotReady: {} - {}:{}:{}:{}", pod.ObjectMeta.Name, hostdns, externalIP, phase, v.Name)
+			kd.removeIP(pod.ObjectMeta.Name, hostdns, externalIP)
 			return
 		}
-		externalIP := kd.getPodExternalIP(pod)
-		phase := pod.Status.Phase
-		if externalIP != "" {
-			if phase == v1.PodRunning {
-				for _, v := range pod.Status.ContainerStatuses {
-					if !v.Ready {
-						log.Debug("Pod updated, NotReady: {} - {}:{}:{}:{}", pod.ObjectMeta.Name, hostdns, externalIP, phase, v.Name)
-						kd.removeIP(pod.ObjectMeta.Name, hostdns, externalIP)
-						return
-					}
-				}
-				log.Debug("Pod updated, All Ready: {} - {}:{}:{}", pod.ObjectMeta.Name, hostdns, externalIP, phase)
-				kd.addnewIP(pod.ObjectMeta.Name, hostdns, externalIP)
-			} else {
-				log.Debug("Pod updated, NotRunning: {} - {}:{}:{}", pod.ObjectMeta.Name, hostdns, externalIP, phase)
-				kd.removeIP(pod.ObjectMeta.Name, hostdns, externalIP)
-			}
-		} else {
-			log.Debug("Pod updated, Missing ExternalIP: {} - {}:{}:{}", pod.ObjectMeta.Name, hostdns, externalIP, phase)
-			kd.removeIP(pod.ObjectMeta.Name, hostdns, externalIP)
-		}
 	}
+
+	log.Debug("Pod updated, All Ready: {} - {}:{}:{}", pod.ObjectMeta.Name, hostdns, externalIP, phase)
+	kd.addnewIP(pod.ObjectMeta.Name, hostdns, externalIP)
+
 }
 
 func (kd *KubeWatcher) podCreated(obj interface{}) {
