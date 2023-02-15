@@ -14,8 +14,8 @@ require (
 	github.com/aws/aws-sdk-go v1.34.27
 	github.com/cornelk/hashmap v1.0.1 // indirect
 	github.com/deckarep/golang-set v1.7.1
-	github.com/google/go-cmp v0.3.1
-	github.com/prometheus/client_golang v1.1.0
+	github.com/google/go-cmp v0.5.5
+	github.com/prometheus/client_golang v1.11.1
 	github.com/spf13/afero v1.2.2 // indirect
 	github.com/spf13/cobra v1.0.0
 	github.com/spf13/viper v1.7.1
